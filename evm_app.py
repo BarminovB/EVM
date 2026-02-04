@@ -432,6 +432,265 @@ def create_evm_performance_graph(
     return fig
 
 
+def create_classic_evm_chart(
+    planned_value_data: list,
+    actual_cost_data: list,
+    earned_value_data: list,
+    current_period: int = None,
+    bac: float = None,
+    currency: str = "€"
+) -> go.Figure:
+    """
+    Create classic EVM S-Curve chart with Cost Variance and Schedule Variance annotations.
+    Similar to standard PMIS EVM visualization.
+
+    Args:
+        planned_value_data: Cumulative Planned Value data points
+        actual_cost_data: Cumulative Actual Cost data points
+        earned_value_data: Cumulative Earned Value data points
+        current_period: Current reporting period (for variance lines)
+        bac: Budget at Completion
+        currency: Currency symbol
+
+    Returns:
+        Plotly Figure object
+    """
+    n_periods = len(planned_value_data)
+    time_periods = list(range(1, n_periods + 1))
+
+    # Determine current period (default to last period with actual data)
+    if current_period is None:
+        # Find last period with non-zero EV or AC
+        for i in range(len(earned_value_data) - 1, -1, -1):
+            if earned_value_data[i] > 0 or actual_cost_data[i] > 0:
+                current_period = i + 1
+                break
+        if current_period is None:
+            current_period = n_periods
+
+    # Get values at current period
+    idx = min(current_period - 1, len(planned_value_data) - 1)
+    pv_current = planned_value_data[idx]
+    ev_current = earned_value_data[idx] if idx < len(earned_value_data) else 0
+    ac_current = actual_cost_data[idx] if idx < len(actual_cost_data) else 0
+
+    # Calculate variances
+    cv = ev_current - ac_current  # Cost Variance
+    sv = ev_current - pv_current  # Schedule Variance
+
+    # Calculate BAC if not provided
+    if bac is None:
+        bac = max(planned_value_data)
+
+    fig = go.Figure()
+
+    # Planned Value (PV) - Time-phased budget - Blue S-curve
+    fig.add_trace(go.Scatter(
+        x=time_periods,
+        y=planned_value_data,
+        mode='lines',
+        name=f'Planned Value / Budget ({currency})',
+        line=dict(color='#1E3A8A', width=3),
+        fill='none',
+        hovertemplate=f'Period %{{x}}<br>PV: {currency}%{{y:,.0f}}<extra></extra>'
+    ))
+
+    # Actual Cost (AC) - Green line
+    ac_periods = [i + 1 for i in range(len(actual_cost_data)) if actual_cost_data[i] > 0 or (i < current_period)]
+    ac_values = [actual_cost_data[i] for i in range(len(ac_periods))]
+    if ac_values:
+        fig.add_trace(go.Scatter(
+            x=ac_periods,
+            y=ac_values,
+            mode='lines',
+            name='Actual Cost',
+            line=dict(color='#16A34A', width=3),
+            hovertemplate=f'Period %{{x}}<br>AC: {currency}%{{y:,.0f}}<extra></extra>'
+        ))
+
+    # Earned Value (EV) - Red line
+    ev_periods = [i + 1 for i in range(len(earned_value_data)) if earned_value_data[i] > 0 or (i < current_period)]
+    ev_values = [earned_value_data[i] for i in range(len(ev_periods))]
+    if ev_values:
+        fig.add_trace(go.Scatter(
+            x=ev_periods,
+            y=ev_values,
+            mode='lines',
+            name='Earned Value',
+            line=dict(color='#DC2626', width=3),
+            hovertemplate=f'Period %{{x}}<br>EV: {currency}%{{y:,.0f}}<extra></extra>'
+        ))
+
+    # Add vertical line at current period (Status Date)
+    fig.add_vline(
+        x=current_period,
+        line=dict(color='#6B7280', width=2, dash='solid'),
+        annotation_text="Status Date",
+        annotation_position="top"
+    )
+
+    # Add Cost Variance annotation (EV to AC)
+    if ev_current > 0 and ac_current > 0:
+        # Vertical line for Cost Variance
+        fig.add_trace(go.Scatter(
+            x=[current_period, current_period],
+            y=[ev_current, ac_current],
+            mode='lines',
+            line=dict(color='#9333EA', width=2, dash='dash'),
+            showlegend=False,
+            hoverinfo='skip'
+        ))
+
+        # Cost Variance annotation
+        cv_mid = (ev_current + ac_current) / 2
+        cv_text = f"Cost Variance<br>{currency}{cv:+,.0f}"
+        fig.add_annotation(
+            x=current_period + 0.3,
+            y=cv_mid,
+            text=cv_text,
+            showarrow=True,
+            arrowhead=2,
+            arrowsize=1,
+            arrowwidth=1,
+            arrowcolor='#9333EA',
+            ax=50,
+            ay=0,
+            font=dict(size=11, color='#9333EA'),
+            bgcolor='rgba(255,255,255,0.8)',
+            bordercolor='#9333EA',
+            borderwidth=1
+        )
+
+    # Add Schedule Variance annotation (EV to PV at current time)
+    if ev_current > 0 and pv_current > 0:
+        # Horizontal dashed line from EV to PV line
+        fig.add_trace(go.Scatter(
+            x=[current_period, current_period],
+            y=[ev_current, pv_current],
+            mode='lines',
+            line=dict(color='#0891B2', width=2, dash='dot'),
+            showlegend=False,
+            hoverinfo='skip'
+        ))
+
+        # Schedule Variance annotation
+        sv_text = f"Schedule Variance<br>{currency}{sv:+,.0f}"
+        sv_y = max(ev_current, pv_current) + (bac * 0.05)
+        fig.add_annotation(
+            x=current_period,
+            y=sv_y,
+            text=sv_text,
+            showarrow=True,
+            arrowhead=2,
+            arrowsize=1,
+            arrowwidth=1,
+            arrowcolor='#0891B2',
+            ax=0,
+            ay=-40,
+            font=dict(size=11, color='#0891B2'),
+            bgcolor='rgba(255,255,255,0.8)',
+            bordercolor='#0891B2',
+            borderwidth=1
+        )
+
+    # Add BAC line
+    fig.add_hline(
+        y=bac,
+        line=dict(color='#1E3A8A', width=1, dash='dash'),
+        annotation_text=f"BAC = {currency}{bac:,.0f}",
+        annotation_position="right"
+    )
+
+    # Calculate max for y-axis
+    max_value = max(bac, max(planned_value_data), max(actual_cost_data) if actual_cost_data else 0)
+
+    fig.update_layout(
+        title={
+            'text': '<b>Cost & Schedule Variance</b>',
+            'x': 0.5,
+            'xanchor': 'center',
+            'font': dict(size=22, color='#1E3A8A')
+        },
+        xaxis_title='<b>Time</b>',
+        yaxis_title=f'<b>Cost ({currency})</b>',
+        legend=dict(
+            orientation="h",
+            yanchor="bottom",
+            y=1.02,
+            xanchor="center",
+            x=0.5,
+            bgcolor='rgba(255,255,255,0.9)',
+            bordercolor='#ccc',
+            borderwidth=1
+        ),
+        height=550,
+        plot_bgcolor='white',
+        paper_bgcolor='white',
+        xaxis=dict(
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='#E5E7EB',
+            zeroline=True,
+            zerolinewidth=2,
+            zerolinecolor='#1E3A8A',
+            dtick=1,
+            tick0=1,
+            range=[0, n_periods + 1]
+        ),
+        yaxis=dict(
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='#E5E7EB',
+            zeroline=True,
+            zerolinewidth=2,
+            zerolinecolor='#1E3A8A',
+            range=[0, max_value * 1.15],
+            tickformat=f'{currency},.0f'
+        ),
+        font=dict(family="Arial, sans-serif", size=12),
+        margin=dict(t=100, b=60, l=80, r=40)
+    )
+
+    # Add text labels on curves
+    if len(planned_value_data) > 2:
+        mid_idx = len(planned_value_data) // 3
+        fig.add_annotation(
+            x=mid_idx + 1,
+            y=planned_value_data[mid_idx] * 1.1,
+            text=f"<b>Time-phased budget<br>({currency})</b>",
+            showarrow=False,
+            font=dict(size=10, color='#1E3A8A'),
+            bgcolor='rgba(255,255,255,0.7)'
+        )
+
+    if ac_values and len(ac_values) > 2:
+        mid_idx = len(ac_values) // 2
+        fig.add_annotation(
+            x=mid_idx + 1,
+            y=ac_values[mid_idx] * 0.85,
+            text="<b>Actual Cost<br>of work to date</b>",
+            showarrow=False,
+            font=dict(size=10, color='#16A34A'),
+            bgcolor='rgba(255,255,255,0.7)'
+        )
+
+    if ev_values and len(ev_values) > 2:
+        last_idx = len(ev_values) - 1
+        fig.add_annotation(
+            x=last_idx + 1.2,
+            y=ev_values[last_idx],
+            text="<b>Earned Value</b>",
+            showarrow=True,
+            arrowhead=2,
+            ax=40,
+            ay=0,
+            font=dict(size=10, color='#DC2626'),
+            bgcolor='rgba(255,255,255,0.7)'
+        )
+
+    return fig
+
+
 def create_gauge_chart(value: float, title: str, min_val: float = 0, max_val: float = 2) -> go.Figure:
     """Create a gauge chart for performance indices"""
     if value >= 1:
@@ -795,6 +1054,45 @@ def main():
             st.header("Visual Analysis")
 
             if periods_data is not None and len(periods_data) > 0:
+                # Classic EVM Chart with Cost & Schedule Variance
+                st.subheader("Cost & Schedule Variance (Classic EVM Chart)")
+
+                # Find current period (last period with data)
+                current_period_idx = len(periods_data)
+                for i in range(len(periods_data) - 1, -1, -1):
+                    if periods_data['EV_cumulative'].iloc[i] > 0:
+                        current_period_idx = i + 1
+                        break
+
+                fig_classic = create_classic_evm_chart(
+                    planned_value_data=periods_data['PV_cumulative'].tolist(),
+                    actual_cost_data=periods_data['AC_cumulative'].tolist(),
+                    earned_value_data=periods_data['EV_cumulative'].tolist(),
+                    current_period=current_period_idx,
+                    bac=bac,
+                    currency="$"
+                )
+                st.plotly_chart(fig_classic, use_container_width=True)
+
+                st.markdown("""
+                **Understanding the Classic EVM Chart:**
+
+                This chart shows the three key EVM metrics as S-curves over time:
+                - **Blue line (Time-phased budget)**: Planned Value (PV) - the baseline schedule
+                - **Green line (Actual Cost)**: What you've actually spent
+                - **Red line (Earned Value)**: The value of work completed
+
+                **Variances shown at Status Date:**
+                - **Cost Variance (CV)** = EV - AC: Vertical distance between EV and AC
+                - **Schedule Variance (SV)** = EV - PV: Vertical distance between EV and PV
+
+                **Quick interpretation:**
+                - CV > 0: Under budget | CV < 0: Over budget
+                - SV > 0: Ahead of schedule | SV < 0: Behind schedule
+                """)
+
+                st.markdown("---")
+
                 # EVM Performance Graph
                 st.subheader("EVM Performance Graph")
                 fig_evm = create_evm_performance_graph(
