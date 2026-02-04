@@ -328,6 +328,110 @@ def create_forecast_chart(bac: float, eac: float, ac: float, ev: float) -> go.Fi
     return fig
 
 
+def create_evm_performance_graph(
+    planned_value_data: list,
+    actual_cost_data: list,
+    earned_value_data: list,
+    time_unit: str = "Period"
+) -> go.Figure:
+    """
+    Create EVM Performance Graph visualizing PV, AC, and EV over time.
+
+    Args:
+        planned_value_data: Cumulative Planned Value data points
+        actual_cost_data: Cumulative Actual Cost data points
+        earned_value_data: Cumulative Earned Value data points
+        time_unit: Label for time axis (e.g., "Week", "Month", "Day")
+
+    Returns:
+        Plotly Figure object
+    """
+    # Create time periods (1-indexed)
+    time_periods = list(range(1, len(planned_value_data) + 1))
+
+    fig = go.Figure()
+
+    # Planned Value (PV) - Blue dashed line
+    fig.add_trace(go.Scatter(
+        x=time_periods,
+        y=planned_value_data,
+        mode='lines+markers',
+        name='Planned Value (PV)',
+        line=dict(color='#1f77b4', width=3, dash='dash'),
+        marker=dict(size=10, symbol='circle'),
+        hovertemplate='%{x}: €%{y:,.0f}<extra>PV</extra>'
+    ))
+
+    # Actual Cost (AC) - Red solid line
+    fig.add_trace(go.Scatter(
+        x=time_periods,
+        y=actual_cost_data,
+        mode='lines+markers',
+        name='Actual Cost (AC)',
+        line=dict(color='#d62728', width=3),
+        marker=dict(size=10, symbol='square'),
+        hovertemplate='%{x}: €%{y:,.0f}<extra>AC</extra>'
+    ))
+
+    # Earned Value (EV) - Green solid line
+    fig.add_trace(go.Scatter(
+        x=time_periods,
+        y=earned_value_data,
+        mode='lines+markers',
+        name='Earned Value (EV)',
+        line=dict(color='#2ca02c', width=3),
+        marker=dict(size=10, symbol='diamond'),
+        hovertemplate='%{x}: €%{y:,.0f}<extra>EV</extra>'
+    ))
+
+    # Calculate max value for y-axis range
+    max_value = max(
+        max(planned_value_data) if planned_value_data else 0,
+        max(actual_cost_data) if actual_cost_data else 0,
+        max(earned_value_data) if earned_value_data else 0
+    )
+
+    fig.update_layout(
+        title={
+            'text': 'EVM Performance Graph',
+            'x': 0.5,
+            'xanchor': 'center',
+            'font': dict(size=20, color='#333')
+        },
+        xaxis_title=f'Time ({time_unit})',
+        yaxis_title='Cost (€)',
+        legend=dict(
+            yanchor="top",
+            y=0.99,
+            xanchor="left",
+            x=0.01,
+            bgcolor='rgba(255,255,255,0.8)',
+            bordercolor='#ccc',
+            borderwidth=1
+        ),
+        hovermode='x unified',
+        height=500,
+        plot_bgcolor='white',
+        xaxis=dict(
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='#e0e0e0',
+            dtick=1,
+            tick0=1
+        ),
+        yaxis=dict(
+            showgrid=True,
+            gridwidth=1,
+            gridcolor='#e0e0e0',
+            range=[0, max_value * 1.1],
+            tickformat='€,.0f'
+        ),
+        font=dict(family="Arial, sans-serif", size=12)
+    )
+
+    return fig
+
+
 def create_gauge_chart(value: float, title: str, min_val: float = 0, max_val: float = 2) -> go.Figure:
     """Create a gauge chart for performance indices"""
     if value >= 1:
@@ -691,6 +795,31 @@ def main():
             st.header("Visual Analysis")
 
             if periods_data is not None and len(periods_data) > 0:
+                # EVM Performance Graph
+                st.subheader("EVM Performance Graph")
+                fig_evm = create_evm_performance_graph(
+                    planned_value_data=periods_data['PV_cumulative'].tolist(),
+                    actual_cost_data=periods_data['AC_cumulative'].tolist(),
+                    earned_value_data=periods_data['EV_cumulative'].tolist(),
+                    time_unit="Period"
+                )
+                st.plotly_chart(fig_evm, use_container_width=True)
+
+                st.markdown("""
+                **How to read the EVM Performance Graph:**
+                - **PV (Blue, dashed)**: Planned Value - the baseline budget over time
+                - **AC (Red, solid)**: Actual Cost - real expenditure to date
+                - **EV (Green, solid)**: Earned Value - value of completed work
+
+                **Interpretation:**
+                - **EV below PV** → Behind schedule (work accomplished < work planned)
+                - **EV above PV** → Ahead of schedule (work accomplished > work planned)
+                - **AC above EV** → Over budget (spending more than earning)
+                - **AC below EV** → Under budget (spending less than earning)
+                """)
+
+                st.markdown("---")
+
                 # S-Curve
                 st.subheader("S-Curve Analysis")
                 fig_s_curve = create_s_curve(periods_data)
@@ -1042,6 +1171,36 @@ def main():
             st.latex(r"ETC = EAC - AC")
             st.latex(r"VAC = BAC - EAC")
             st.latex(r"TCPI = \frac{BAC - EV}{BAC - AC}")
+
+    # ==================== FOOTER ====================
+    st.markdown("---")
+    st.markdown(
+        """
+        <div style="text-align: center; padding: 20px; color: #666;">
+            <p style="margin-bottom: 10px;">
+                <strong>Developed by Boris Taliev</strong>
+            </p>
+            <p style="margin-bottom: 10px;">
+                <a href="https://www.linkedin.com/in/boris-taliev-a9960a6b/" target="_blank" style="text-decoration: none; color: #0077B5;">
+                    🔗 LinkedIn Profile
+                </a>
+            </p>
+            <p style="margin-bottom: 5px;">
+                <strong>My other projects:</strong>
+            </p>
+            <p style="margin-bottom: 5px;">
+                <a href="https://rccalcs-tp7b2fnba2jsmk8jasxtxv.streamlit.app" target="_blank" style="text-decoration: none; color: #FF4B4B;">
+                    📊 RC Calculator
+                </a>
+                &nbsp;|&nbsp;
+                <a href="https://steelsheet.streamlit.app" target="_blank" style="text-decoration: none; color: #FF4B4B;">
+                    🔩 Steel Sheet Calculator
+                </a>
+            </p>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
 
 if __name__ == "__main__":
