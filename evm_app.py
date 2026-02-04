@@ -18,43 +18,9 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# Custom CSS
+# Custom CSS (minimal - theme compatible)
 st.markdown("""
 <style>
-    .metric-card {
-        background-color: #f0f2f6;
-        border-radius: 10px;
-        padding: 20px;
-        margin: 10px 0;
-    }
-    .formula-box {
-        background-color: #e8f4f8;
-        border-left: 4px solid #1f77b4;
-        padding: 15px;
-        margin: 10px 0;
-        border-radius: 0 10px 10px 0;
-    }
-    .interpretation-good {
-        background-color: #d4edda;
-        border-left: 4px solid #28a745;
-        padding: 15px;
-        margin: 10px 0;
-        border-radius: 0 10px 10px 0;
-    }
-    .interpretation-bad {
-        background-color: #f8d7da;
-        border-left: 4px solid #dc3545;
-        padding: 15px;
-        margin: 10px 0;
-        border-radius: 0 10px 10px 0;
-    }
-    .interpretation-neutral {
-        background-color: #fff3cd;
-        border-left: 4px solid #ffc107;
-        padding: 15px;
-        margin: 10px 0;
-        border-radius: 0 10px 10px 0;
-    }
     .stTabs [data-baseweb="tab-list"] {
         gap: 24px;
     }
@@ -438,18 +404,20 @@ def create_classic_evm_chart(
     earned_value_data: list,
     current_period: int = None,
     bac: float = None,
-    currency: str = "€"
+    eac: float = None,
+    currency: str = "$"
 ) -> go.Figure:
     """
-    Create classic EVM S-Curve chart with Cost Variance and Schedule Variance annotations.
-    Similar to standard PMIS EVM visualization.
+    Create classic EVM S-Curve chart with Cost Variance, Schedule Variance,
+    EAC forecast, and Management Reserve - following PMBOK/IPMA standards.
 
     Args:
         planned_value_data: Cumulative Planned Value data points
         actual_cost_data: Cumulative Actual Cost data points
         earned_value_data: Cumulative Earned Value data points
-        current_period: Current reporting period (for variance lines)
+        current_period: Current reporting period (Time Now)
         bac: Budget at Completion
+        eac: Estimate at Completion
         currency: Currency symbol
 
     Returns:
@@ -458,9 +426,8 @@ def create_classic_evm_chart(
     n_periods = len(planned_value_data)
     time_periods = list(range(1, n_periods + 1))
 
-    # Determine current period (default to last period with actual data)
+    # Determine current period (last period with actual data)
     if current_period is None:
-        # Find last period with non-zero EV or AC
         for i in range(len(earned_value_data) - 1, -1, -1):
             if earned_value_data[i] > 0 or actual_cost_data[i] > 0:
                 current_period = i + 1
@@ -474,145 +441,298 @@ def create_classic_evm_chart(
     ev_current = earned_value_data[idx] if idx < len(earned_value_data) else 0
     ac_current = actual_cost_data[idx] if idx < len(actual_cost_data) else 0
 
-    # Calculate variances
-    cv = ev_current - ac_current  # Cost Variance
-    sv = ev_current - pv_current  # Schedule Variance
-
     # Calculate BAC if not provided
     if bac is None:
         bac = max(planned_value_data)
 
+    # Calculate performance indices
+    cpi = ev_current / ac_current if ac_current > 0 else 1
+    spi = ev_current / pv_current if pv_current > 0 else 1
+
+    # Calculate EAC if not provided (using typical formula: BAC / CPI)
+    if eac is None:
+        eac = bac / cpi if cpi > 0 else bac
+
+    # Calculate variances
+    cv = ev_current - ac_current  # Cost Variance
+    sv = ev_current - pv_current  # Schedule Variance
+
+    # Calculate SV-time (schedule variance in time units)
+    # Find when PV reached current EV level
+    sv_time = 0
+    if ev_current > 0:
+        for i, pv_val in enumerate(planned_value_data):
+            if pv_val >= ev_current:
+                sv_time = current_period - (i + 1)
+                break
+
+    # Estimate completion period based on SPI
+    completion_period = n_periods
+    if spi > 0 and spi != 1:
+        remaining_periods = (n_periods - current_period) / spi
+        completion_period = current_period + remaining_periods
+
     fig = go.Figure()
 
-    # Planned Value (PV) - Time-phased budget - Blue S-curve
+    # === 1. PLANNED VALUE (PV) - Blue S-curve (PMB - Performance Measurement Baseline) ===
     fig.add_trace(go.Scatter(
         x=time_periods,
         y=planned_value_data,
         mode='lines',
-        name=f'Planned Value / Budget ({currency})',
-        line=dict(color='#1E3A8A', width=3),
-        fill='none',
-        hovertemplate=f'Period %{{x}}<br>PV: {currency}%{{y:,.0f}}<extra></extra>'
+        name='PV (BCWS)',
+        line=dict(color='#2563EB', width=3),
+        hovertemplate=f'Period %{{x}}<br>PV: {currency}%{{y:,.0f}}<extra>Planned Value</extra>'
     ))
 
-    # Actual Cost (AC) - Green line
-    ac_periods = [i + 1 for i in range(len(actual_cost_data)) if actual_cost_data[i] > 0 or (i < current_period)]
-    ac_values = [actual_cost_data[i] for i in range(len(ac_periods))]
-    if ac_values:
+    # === 2. EARNED VALUE (EV) - Green line ===
+    ev_periods = list(range(1, current_period + 1))
+    ev_values = earned_value_data[:current_period]
+    fig.add_trace(go.Scatter(
+        x=ev_periods,
+        y=ev_values,
+        mode='lines',
+        name='EV (BCWP)',
+        line=dict(color='#16A34A', width=3),
+        hovertemplate=f'Period %{{x}}<br>EV: {currency}%{{y:,.0f}}<extra>Earned Value</extra>'
+    ))
+
+    # === 3. ACTUAL COST (AC) - Red line ===
+    ac_periods = list(range(1, current_period + 1))
+    ac_values = actual_cost_data[:current_period]
+    fig.add_trace(go.Scatter(
+        x=ac_periods,
+        y=ac_values,
+        mode='lines',
+        name='AC (ACWP)',
+        line=dict(color='#DC2626', width=3),
+        hovertemplate=f'Period %{{x}}<br>AC: {currency}%{{y:,.0f}}<extra>Actual Cost</extra>'
+    ))
+
+    # === 4. EAC FORECAST LINE - Cyan dashed line ===
+    # Project from current AC to EAC at completion
+    if eac > 0 and completion_period > current_period:
+        eac_x = [current_period, completion_period]
+        eac_y = [ac_current, eac]
         fig.add_trace(go.Scatter(
-            x=ac_periods,
-            y=ac_values,
+            x=eac_x,
+            y=eac_y,
             mode='lines',
-            name='Actual Cost',
-            line=dict(color='#16A34A', width=3),
-            hovertemplate=f'Period %{{x}}<br>AC: {currency}%{{y:,.0f}}<extra></extra>'
+            name='EAC',
+            line=dict(color='#06B6D4', width=2, dash='dash'),
+            hovertemplate=f'Period %{{x}}<br>Forecast: {currency}%{{y:,.0f}}<extra>EAC Projection</extra>'
         ))
 
-    # Earned Value (EV) - Red line
-    ev_periods = [i + 1 for i in range(len(earned_value_data)) if earned_value_data[i] > 0 or (i < current_period)]
-    ev_values = [earned_value_data[i] for i in range(len(ev_periods))]
-    if ev_values:
-        fig.add_trace(go.Scatter(
-            x=ev_periods,
-            y=ev_values,
-            mode='lines',
-            name='Earned Value',
-            line=dict(color='#DC2626', width=3),
-            hovertemplate=f'Period %{{x}}<br>EV: {currency}%{{y:,.0f}}<extra></extra>'
-        ))
+    # === 5. MANAGEMENT RESERVE AREA ===
+    if eac > bac:
+        # Show area between BAC and EAC as Management Reserve needed
+        fig.add_hrect(
+            y0=bac, y1=eac,
+            fillcolor="rgba(251, 191, 36, 0.3)",
+            line_width=0,
+            annotation_text="Management Reserve",
+            annotation_position="inside top left"
+        )
 
-    # Add vertical line at current period (Status Date)
-    fig.add_vline(
-        x=current_period,
-        line=dict(color='#6B7280', width=2, dash='solid'),
-        annotation_text="Status Date",
-        annotation_position="top"
+    # === 6. BAC LINE ===
+    fig.add_hline(
+        y=bac,
+        line=dict(color='#1E3A8A', width=2, dash='dash'),
+    )
+    fig.add_annotation(
+        x=n_periods + 0.5,
+        y=bac,
+        text=f"<b>BAC</b><br>{currency}{bac:,.0f}",
+        showarrow=False,
+        xanchor='left',
+        font=dict(size=11, color='#1E3A8A')
     )
 
-    # Add Cost Variance annotation (EV to AC)
+    # === 7. EAC LINE ===
+    if eac != bac:
+        fig.add_hline(
+            y=eac,
+            line=dict(color='#06B6D4', width=1, dash='dot'),
+        )
+        fig.add_annotation(
+            x=n_periods + 0.5,
+            y=eac,
+            text=f"<b>EAC</b><br>{currency}{eac:,.0f}",
+            showarrow=False,
+            xanchor='left',
+            font=dict(size=11, color='#06B6D4')
+        )
+
+    # === 8. TIME NOW (Status Date) vertical line ===
+    fig.add_vline(
+        x=current_period,
+        line=dict(color='#6B7280', width=2, dash='dash'),
+    )
+    fig.add_annotation(
+        x=current_period,
+        y=0,
+        text="<b>Time Now</b>",
+        showarrow=False,
+        yshift=-25,
+        font=dict(size=11, color='#6B7280')
+    )
+
+    # === 9. COMPLETION DATE vertical line ===
+    if completion_period > n_periods:
+        fig.add_vline(
+            x=completion_period,
+            line=dict(color='#1E3A8A', width=2, dash='dash'),
+        )
+        fig.add_annotation(
+            x=completion_period,
+            y=0,
+            text="<b>Completion<br>Date</b>",
+            showarrow=False,
+            yshift=-25,
+            font=dict(size=10, color='#1E3A8A')
+        )
+
+    # === 10. COST VARIANCE (CV) annotation ===
     if ev_current > 0 and ac_current > 0:
-        # Vertical line for Cost Variance
+        # Bracket showing CV
+        cv_x = current_period - 0.15
         fig.add_trace(go.Scatter(
-            x=[current_period, current_period],
+            x=[cv_x, cv_x],
             y=[ev_current, ac_current],
             mode='lines',
-            line=dict(color='#9333EA', width=2, dash='dash'),
+            line=dict(color='#000000', width=2),
+            showlegend=False,
+            hoverinfo='skip'
+        ))
+        # Add bracket ends
+        fig.add_trace(go.Scatter(
+            x=[cv_x - 0.1, cv_x + 0.1],
+            y=[ev_current, ev_current],
+            mode='lines',
+            line=dict(color='#000000', width=2),
+            showlegend=False,
+            hoverinfo='skip'
+        ))
+        fig.add_trace(go.Scatter(
+            x=[cv_x - 0.1, cv_x + 0.1],
+            y=[ac_current, ac_current],
+            mode='lines',
+            line=dict(color='#000000', width=2),
             showlegend=False,
             hoverinfo='skip'
         ))
 
-        # Cost Variance annotation
         cv_mid = (ev_current + ac_current) / 2
-        cv_text = f"Cost Variance<br>{currency}{cv:+,.0f}"
         fig.add_annotation(
-            x=current_period + 0.3,
+            x=cv_x - 0.3,
             y=cv_mid,
-            text=cv_text,
-            showarrow=True,
-            arrowhead=2,
-            arrowsize=1,
-            arrowwidth=1,
-            arrowcolor='#9333EA',
-            ax=50,
-            ay=0,
-            font=dict(size=11, color='#9333EA'),
-            bgcolor='rgba(255,255,255,0.8)',
-            bordercolor='#9333EA',
-            borderwidth=1
+            text=f"<b>Cost Variance (CV)</b><br>{currency}{cv:+,.0f}",
+            showarrow=False,
+            xanchor='right',
+            font=dict(size=10, color='#000000'),
+            bgcolor='rgba(255,255,255,0.8)'
         )
 
-    # Add Schedule Variance annotation (EV to PV at current time)
+    # === 11. SCHEDULE VARIANCE (SV) annotation ===
     if ev_current > 0 and pv_current > 0:
-        # Horizontal dashed line from EV to PV line
+        # Bracket showing SV
         fig.add_trace(go.Scatter(
             x=[current_period, current_period],
             y=[ev_current, pv_current],
             mode='lines',
-            line=dict(color='#0891B2', width=2, dash='dot'),
+            line=dict(color='#000000', width=2),
             showlegend=False,
             hoverinfo='skip'
         ))
 
-        # Schedule Variance annotation
-        sv_text = f"Schedule Variance<br>{currency}{sv:+,.0f}"
-        sv_y = max(ev_current, pv_current) + (bac * 0.05)
         fig.add_annotation(
-            x=current_period,
-            y=sv_y,
-            text=sv_text,
+            x=current_period + 0.3,
+            y=(ev_current + pv_current) / 2,
+            text=f"<b>Schedule Variance (SV)</b><br>{currency}{sv:+,.0f}",
             showarrow=True,
-            arrowhead=2,
-            arrowsize=1,
-            arrowwidth=1,
-            arrowcolor='#0891B2',
-            ax=0,
-            ay=-40,
-            font=dict(size=11, color='#0891B2'),
-            bgcolor='rgba(255,255,255,0.8)',
-            bordercolor='#0891B2',
-            borderwidth=1
+            ax=80,
+            ay=0,
+            font=dict(size=10, color='#000000'),
+            bgcolor='rgba(255,255,255,0.8)'
         )
 
-    # Add BAC line
-    fig.add_hline(
-        y=bac,
-        line=dict(color='#1E3A8A', width=1, dash='dash'),
-        annotation_text=f"BAC = {currency}{bac:,.0f}",
-        annotation_position="right"
+    # === 12. SV-time annotation ===
+    if sv_time != 0 and ev_current > 0:
+        # Find the period where PV equals current EV
+        sv_time_period = current_period - sv_time
+        if 0 < sv_time_period <= n_periods:
+            fig.add_trace(go.Scatter(
+                x=[sv_time_period, current_period],
+                y=[ev_current, ev_current],
+                mode='lines',
+                line=dict(color='#9333EA', width=2, dash='dot'),
+                showlegend=False,
+                hoverinfo='skip'
+            ))
+            fig.add_annotation(
+                x=(sv_time_period + current_period) / 2,
+                y=ev_current,
+                text=f"<b>SV-time</b><br>{sv_time:+.1f} periods",
+                showarrow=False,
+                yshift=20,
+                font=dict(size=10, color='#9333EA'),
+                bgcolor='rgba(255,255,255,0.8)'
+            )
+
+    # === 13. CURVE LABELS ===
+    # PV label
+    pv_label_idx = min(n_periods - 2, int(n_periods * 0.7))
+    fig.add_annotation(
+        x=pv_label_idx + 1,
+        y=planned_value_data[pv_label_idx] * 1.08,
+        text="<b>PV (BCWS)</b>",
+        showarrow=True,
+        arrowhead=2,
+        ax=-30,
+        ay=-20,
+        font=dict(size=10, color='#2563EB')
     )
 
-    # Calculate max for y-axis
-    max_value = max(bac, max(planned_value_data), max(actual_cost_data) if actual_cost_data else 0)
+    # AC label
+    if len(ac_values) > 2:
+        ac_label_idx = len(ac_values) // 2
+        fig.add_annotation(
+            x=ac_label_idx + 1,
+            y=ac_values[ac_label_idx] * 1.1,
+            text="<b>AC (ACWP)</b>",
+            showarrow=True,
+            arrowhead=2,
+            ax=-40,
+            ay=-20,
+            font=dict(size=10, color='#DC2626')
+        )
+
+    # EV label
+    if len(ev_values) > 2:
+        ev_label_idx = len(ev_values) // 2
+        fig.add_annotation(
+            x=ev_label_idx + 1,
+            y=ev_values[ev_label_idx] * 0.9,
+            text="<b>EV (BCWP)</b>",
+            showarrow=True,
+            arrowhead=2,
+            ax=-40,
+            ay=20,
+            font=dict(size=10, color='#16A34A')
+        )
+
+    # === LAYOUT ===
+    max_y = max(bac, eac, max(planned_value_data), max(actual_cost_data) if actual_cost_data else 0) * 1.2
+    max_x = max(n_periods, completion_period) + 1
 
     fig.update_layout(
         title={
-            'text': '<b>Cost & Schedule Variance</b>',
+            'text': '<b>Earned Value Management (EVM) Chart</b>',
             'x': 0.5,
             'xanchor': 'center',
-            'font': dict(size=22, color='#1E3A8A')
+            'font': dict(size=20)
         },
         xaxis_title='<b>Time</b>',
-        yaxis_title=f'<b>Cost ({currency})</b>',
+        yaxis_title=f'<b>{currency}</b>',
         legend=dict(
             orientation="h",
             yanchor="bottom",
@@ -620,22 +740,19 @@ def create_classic_evm_chart(
             xanchor="center",
             x=0.5,
             bgcolor='rgba(255,255,255,0.9)',
-            bordercolor='#ccc',
             borderwidth=1
         ),
-        height=550,
+        height=600,
         plot_bgcolor='white',
-        paper_bgcolor='white',
         xaxis=dict(
             showgrid=True,
             gridwidth=1,
             gridcolor='#E5E7EB',
             zeroline=True,
             zerolinewidth=2,
-            zerolinecolor='#1E3A8A',
-            dtick=1,
-            tick0=1,
-            range=[0, n_periods + 1]
+            zerolinecolor='#000000',
+            range=[0, max_x],
+            dtick=1
         ),
         yaxis=dict(
             showgrid=True,
@@ -643,50 +760,13 @@ def create_classic_evm_chart(
             gridcolor='#E5E7EB',
             zeroline=True,
             zerolinewidth=2,
-            zerolinecolor='#1E3A8A',
-            range=[0, max_value * 1.15],
+            zerolinecolor='#000000',
+            range=[0, max_y],
             tickformat=f'{currency},.0f'
         ),
         font=dict(family="Arial, sans-serif", size=12),
-        margin=dict(t=100, b=60, l=80, r=40)
+        margin=dict(t=80, b=80, l=80, r=100)
     )
-
-    # Add text labels on curves
-    if len(planned_value_data) > 2:
-        mid_idx = len(planned_value_data) // 3
-        fig.add_annotation(
-            x=mid_idx + 1,
-            y=planned_value_data[mid_idx] * 1.1,
-            text=f"<b>Time-phased budget<br>({currency})</b>",
-            showarrow=False,
-            font=dict(size=10, color='#1E3A8A'),
-            bgcolor='rgba(255,255,255,0.7)'
-        )
-
-    if ac_values and len(ac_values) > 2:
-        mid_idx = len(ac_values) // 2
-        fig.add_annotation(
-            x=mid_idx + 1,
-            y=ac_values[mid_idx] * 0.85,
-            text="<b>Actual Cost<br>of work to date</b>",
-            showarrow=False,
-            font=dict(size=10, color='#16A34A'),
-            bgcolor='rgba(255,255,255,0.7)'
-        )
-
-    if ev_values and len(ev_values) > 2:
-        last_idx = len(ev_values) - 1
-        fig.add_annotation(
-            x=last_idx + 1.2,
-            y=ev_values[last_idx],
-            text="<b>Earned Value</b>",
-            showarrow=True,
-            arrowhead=2,
-            ax=40,
-            ay=0,
-            font=dict(size=10, color='#DC2626'),
-            bgcolor='rgba(255,255,255,0.7)'
-        )
 
     return fig
 
@@ -1070,23 +1150,29 @@ def main():
                     earned_value_data=periods_data['EV_cumulative'].tolist(),
                     current_period=current_period_idx,
                     bac=bac,
+                    eac=metrics['EAC_typical'],
                     currency="$"
                 )
                 st.plotly_chart(fig_classic, use_container_width=True)
 
                 st.markdown("""
-                **Understanding the Classic EVM Chart:**
+                **Understanding the EVM Chart (PMBOK/IPMA Standard):**
 
-                This chart shows the three key EVM metrics as S-curves over time:
-                - **Blue line (Time-phased budget)**: Planned Value (PV) - the baseline schedule
-                - **Green line (Actual Cost)**: What you've actually spent
-                - **Red line (Earned Value)**: The value of work completed
+                **Main Curves:**
+                - **PV (BCWS)** - Planned Value / Budgeted Cost of Work Scheduled (blue)
+                - **EV (BCWP)** - Earned Value / Budgeted Cost of Work Performed (green)
+                - **AC (ACWP)** - Actual Cost / Actual Cost of Work Performed (red)
+                - **EAC** - Estimate at Completion forecast (cyan dashed)
 
-                **Variances shown at Status Date:**
-                - **Cost Variance (CV)** = EV - AC: Vertical distance between EV and AC
-                - **Schedule Variance (SV)** = EV - PV: Vertical distance between EV and PV
+                **Key Indicators:**
+                - **Cost Variance (CV)** = EV - AC: Vertical gap between EV and AC
+                - **Schedule Variance (SV)** = EV - PV: Vertical gap between EV and PV
+                - **SV-time** - Schedule variance expressed in time units
+                - **BAC** - Budget at Completion (original budget)
+                - **EAC** - Estimate at Completion (forecasted final cost)
+                - **Management Reserve** - Buffer between BAC and EAC (if over budget)
 
-                **Quick interpretation:**
+                **Interpretation:**
                 - CV > 0: Under budget | CV < 0: Over budget
                 - SV > 0: Ahead of schedule | SV < 0: Behind schedule
                 """)
@@ -1227,41 +1313,41 @@ def main():
             interpretation, status = interpret_metric('SV', metrics['SV'])
             st.markdown(f"#### Schedule Variance (SV) = ${metrics['SV']:,.0f}")
             if status == "good":
-                st.markdown(f'<div class="interpretation-good">{interpretation}</div>', unsafe_allow_html=True)
+                st.success(interpretation)
             elif status == "bad":
-                st.markdown(f'<div class="interpretation-bad">{interpretation}</div>', unsafe_allow_html=True)
+                st.error(interpretation)
             else:
-                st.markdown(f'<div class="interpretation-neutral">{interpretation}</div>', unsafe_allow_html=True)
+                st.warning(interpretation)
 
             # Cost Variance
             interpretation, status = interpret_metric('CV', metrics['CV'])
             st.markdown(f"#### Cost Variance (CV) = ${metrics['CV']:,.0f}")
             if status == "good":
-                st.markdown(f'<div class="interpretation-good">{interpretation}</div>', unsafe_allow_html=True)
+                st.success(interpretation)
             elif status == "bad":
-                st.markdown(f'<div class="interpretation-bad">{interpretation}</div>', unsafe_allow_html=True)
+                st.error(interpretation)
             else:
-                st.markdown(f'<div class="interpretation-neutral">{interpretation}</div>', unsafe_allow_html=True)
+                st.warning(interpretation)
 
             # SPI
             interpretation, status = interpret_metric('SPI', metrics['SPI'])
             st.markdown(f"#### Schedule Performance Index (SPI) = {metrics['SPI']:.3f}")
             if status == "good":
-                st.markdown(f'<div class="interpretation-good">{interpretation}</div>', unsafe_allow_html=True)
+                st.success(interpretation)
             elif status == "bad":
-                st.markdown(f'<div class="interpretation-bad">{interpretation}</div>', unsafe_allow_html=True)
+                st.error(interpretation)
             else:
-                st.markdown(f'<div class="interpretation-neutral">{interpretation}</div>', unsafe_allow_html=True)
+                st.warning(interpretation)
 
             # CPI
             interpretation, status = interpret_metric('CPI', metrics['CPI'])
             st.markdown(f"#### Cost Performance Index (CPI) = {metrics['CPI']:.3f}")
             if status == "good":
-                st.markdown(f'<div class="interpretation-good">{interpretation}</div>', unsafe_allow_html=True)
+                st.success(interpretation)
             elif status == "bad":
-                st.markdown(f'<div class="interpretation-bad">{interpretation}</div>', unsafe_allow_html=True)
+                st.error(interpretation)
             else:
-                st.markdown(f'<div class="interpretation-neutral">{interpretation}</div>', unsafe_allow_html=True)
+                st.warning(interpretation)
 
             # Forecast Analysis
             st.markdown("---")
@@ -1270,17 +1356,17 @@ def main():
             st.markdown(f"#### Estimate at Completion (EAC) = ${metrics['EAC_typical']:,.0f}")
             variance_pct = ((metrics['EAC_typical'] - metrics['BAC']) / metrics['BAC']) * 100
             if metrics['EAC_typical'] <= metrics['BAC']:
-                st.markdown(f'<div class="interpretation-good">✅ **Good News**: The project is forecasted to complete ${metrics["BAC"] - metrics["EAC_typical"]:,.0f} ({abs(variance_pct):.1f}%) under the original budget.</div>', unsafe_allow_html=True)
+                st.success(f"✅ **Good News**: The project is forecasted to complete ${metrics['BAC'] - metrics['EAC_typical']:,.0f} ({abs(variance_pct):.1f}%) under the original budget.")
             else:
-                st.markdown(f'<div class="interpretation-bad">⚠️ **Warning**: The project is forecasted to exceed the original budget by ${metrics["EAC_typical"] - metrics["BAC"]:,.0f} ({variance_pct:.1f}%). Consider scope reduction or additional funding.</div>', unsafe_allow_html=True)
+                st.error(f"⚠️ **Warning**: The project is forecasted to exceed the original budget by ${metrics['EAC_typical'] - metrics['BAC']:,.0f} ({variance_pct:.1f}%). Consider scope reduction or additional funding.")
 
             # TCPI Analysis
             st.markdown(f"#### To-Complete Performance Index (TCPI) = {metrics['TCPI_BAC']:.3f}")
             interpretation, status = interpret_metric('TCPI', metrics['TCPI_BAC'])
             if status == "good":
-                st.markdown(f'<div class="interpretation-good">{interpretation}</div>', unsafe_allow_html=True)
+                st.success(interpretation)
             else:
-                st.markdown(f'<div class="interpretation-bad">{interpretation}</div>', unsafe_allow_html=True)
+                st.error(interpretation)
 
             # Recommendations
             st.markdown("---")
