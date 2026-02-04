@@ -114,7 +114,7 @@ def interpret_metric(metric_name: str, value: float) -> tuple:
         },
         'CPI': {
             'positive': ("✅ **Efficient Cost Performance**: For every dollar spent, more than one dollar of value is being earned.", "good"),
-            'negative': ("⚠️ **Inefficient Cost Performance**: For every dollar spent, only ${:.2f} of value is being earned.".format(value), "bad"),
+            'negative': ("⚠️ **Inefficient Cost Performance**: For every unit spent, only {:.2f} of value is being earned.".format(value), "bad"),
             'zero': ("➡️ **On Budget**: Cost performance is exactly as planned.", "neutral")
         },
         'VAC': {
@@ -188,7 +188,7 @@ def create_s_curve(periods_data: pd.DataFrame) -> go.Figure:
     fig.update_layout(
         title='S-Curve: Cumulative Project Performance',
         xaxis_title='Time Period',
-        yaxis_title='Cost ($)',
+        yaxis_title='Cost',
         legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
         hovermode='x unified',
         height=500
@@ -222,8 +222,8 @@ def create_variance_chart(periods_data: pd.DataFrame) -> go.Figure:
 
     fig.update_layout(height=500, showlegend=False)
     fig.update_xaxes(title_text="Time Period", row=2, col=1)
-    fig.update_yaxes(title_text="Variance ($)", row=1, col=1)
-    fig.update_yaxes(title_text="Variance ($)", row=2, col=1)
+    fig.update_yaxes(title_text="Variance", row=1, col=1)
+    fig.update_yaxes(title_text="Variance", row=2, col=1)
 
     return fig
 
@@ -280,13 +280,13 @@ def create_forecast_chart(bac: float, eac: float, ac: float, ev: float) -> go.Fi
     colors = ['#1f77b4', '#ff7f0e', '#d62728', '#2ca02c']
 
     fig = go.Figure(data=[
-        go.Bar(x=categories, y=values, marker_color=colors, text=[f'${v:,.0f}' for v in values],
+        go.Bar(x=categories, y=values, marker_color=colors, text=[f'{v:,.0f}' for v in values],
                textposition='outside')
     ])
 
     fig.update_layout(
         title='Budget vs. Forecast Comparison',
-        yaxis_title='Cost ($)',
+        yaxis_title='Cost',
         height=400,
         showlegend=False
     )
@@ -325,7 +325,7 @@ def create_evm_performance_graph(
         name='Planned Value (PV)',
         line=dict(color='#1f77b4', width=3, dash='dash'),
         marker=dict(size=10, symbol='circle'),
-        hovertemplate='%{x}: €%{y:,.0f}<extra>PV</extra>'
+        hovertemplate='Period %{x}<br>PV: %{y:,.0f}<extra></extra>'
     ))
 
     # Actual Cost (AC) - Red solid line
@@ -336,7 +336,7 @@ def create_evm_performance_graph(
         name='Actual Cost (AC)',
         line=dict(color='#d62728', width=3),
         marker=dict(size=10, symbol='square'),
-        hovertemplate='%{x}: €%{y:,.0f}<extra>AC</extra>'
+        hovertemplate='Period %{x}<br>AC: %{y:,.0f}<extra></extra>'
     ))
 
     # Earned Value (EV) - Green solid line
@@ -347,7 +347,7 @@ def create_evm_performance_graph(
         name='Earned Value (EV)',
         line=dict(color='#2ca02c', width=3),
         marker=dict(size=10, symbol='diamond'),
-        hovertemplate='%{x}: €%{y:,.0f}<extra>EV</extra>'
+        hovertemplate='Period %{x}<br>EV: %{y:,.0f}<extra></extra>'
     ))
 
     # Calculate max value for y-axis range
@@ -365,7 +365,7 @@ def create_evm_performance_graph(
             'font': dict(size=20, color='#333')
         },
         xaxis_title=f'Time ({time_unit})',
-        yaxis_title='Cost (€)',
+        yaxis_title='Cost',
         legend=dict(
             yanchor="top",
             y=0.99,
@@ -390,7 +390,7 @@ def create_evm_performance_graph(
             gridwidth=1,
             gridcolor='#e0e0e0',
             range=[0, max_value * 1.1],
-            tickformat='€,.0f'
+            tickformat=',.0f'
         ),
         font=dict(family="Arial, sans-serif", size=12)
     )
@@ -404,8 +404,7 @@ def create_classic_evm_chart(
     earned_value_data: list,
     current_period: int = None,
     bac: float = None,
-    eac: float = None,
-    currency: str = "$"
+    eac: float = None
 ) -> go.Figure:
     """
     Create classic EVM S-Curve chart with Cost Variance, Schedule Variance,
@@ -481,7 +480,7 @@ def create_classic_evm_chart(
         mode='lines',
         name='PV (BCWS)',
         line=dict(color='#2563EB', width=3),
-        hovertemplate=f'Period %{{x}}<br>PV: {currency}%{{y:,.0f}}<extra>Planned Value</extra>'
+        hovertemplate='Period %{x}<br>PV: %{y:,.0f}<extra>Planned Value</extra>'
     ))
 
     # === 2. EARNED VALUE (EV) - Green line ===
@@ -493,7 +492,7 @@ def create_classic_evm_chart(
         mode='lines',
         name='EV (BCWP)',
         line=dict(color='#16A34A', width=3),
-        hovertemplate=f'Period %{{x}}<br>EV: {currency}%{{y:,.0f}}<extra>Earned Value</extra>'
+        hovertemplate='Period %{x}<br>EV: %{y:,.0f}<extra>Earned Value</extra>'
     ))
 
     # === 3. ACTUAL COST (AC) - Red line ===
@@ -505,7 +504,7 @@ def create_classic_evm_chart(
         mode='lines',
         name='AC (ACWP)',
         line=dict(color='#DC2626', width=3),
-        hovertemplate=f'Period %{{x}}<br>AC: {currency}%{{y:,.0f}}<extra>Actual Cost</extra>'
+        hovertemplate='Period %{x}<br>AC: %{y:,.0f}<extra>Actual Cost</extra>'
     ))
 
     # === 4. EAC FORECAST LINE - Cyan dashed line ===
@@ -519,7 +518,7 @@ def create_classic_evm_chart(
             mode='lines',
             name='EAC',
             line=dict(color='#06B6D4', width=2, dash='dash'),
-            hovertemplate=f'Period %{{x}}<br>Forecast: {currency}%{{y:,.0f}}<extra>EAC Projection</extra>'
+            hovertemplate='Period %{x}<br>Forecast: %{y:,.0f}<extra>EAC Projection</extra>'
         ))
 
     # === 5. MANAGEMENT RESERVE AREA ===
@@ -541,7 +540,7 @@ def create_classic_evm_chart(
     fig.add_annotation(
         x=n_periods + 0.5,
         y=bac,
-        text=f"<b>BAC</b><br>{currency}{bac:,.0f}",
+        text=f"<b>BAC</b><br>{bac:,.0f}",
         showarrow=False,
         xanchor='left',
         font=dict(size=11, color='#1E3A8A')
@@ -556,7 +555,7 @@ def create_classic_evm_chart(
         fig.add_annotation(
             x=n_periods + 0.5,
             y=eac,
-            text=f"<b>EAC</b><br>{currency}{eac:,.0f}",
+            text=f"<b>EAC</b><br>{eac:,.0f}",
             showarrow=False,
             xanchor='left',
             font=dict(size=11, color='#06B6D4')
@@ -625,7 +624,7 @@ def create_classic_evm_chart(
         fig.add_annotation(
             x=cv_x - 0.3,
             y=cv_mid,
-            text=f"<b>Cost Variance (CV)</b><br>{currency}{cv:+,.0f}",
+            text=f"<b>Cost Variance (CV)</b><br>{cv:+,.0f}",
             showarrow=False,
             xanchor='right',
             font=dict(size=10, color='#000000'),
@@ -647,7 +646,7 @@ def create_classic_evm_chart(
         fig.add_annotation(
             x=current_period + 0.3,
             y=(ev_current + pv_current) / 2,
-            text=f"<b>Schedule Variance (SV)</b><br>{currency}{sv:+,.0f}",
+            text=f"<b>Schedule Variance (SV)</b><br>{sv:+,.0f}",
             showarrow=True,
             ax=80,
             ay=0,
@@ -732,7 +731,7 @@ def create_classic_evm_chart(
             'font': dict(size=20)
         },
         xaxis_title='<b>Time</b>',
-        yaxis_title=f'<b>{currency}</b>',
+        yaxis_title='<b>Cost</b>',
         legend=dict(
             orientation="h",
             yanchor="bottom",
@@ -762,7 +761,7 @@ def create_classic_evm_chart(
             zerolinewidth=2,
             zerolinecolor='#000000',
             range=[0, max_y],
-            tickformat=f'{currency},.0f'
+            tickformat=',.0f'
         ),
         font=dict(family="Arial, sans-serif", size=12),
         margin=dict(t=80, b=80, l=80, r=100)
@@ -861,19 +860,19 @@ def main():
         elif input_mode == "Single Period Analysis":
             st.subheader("Enter Values")
 
-            bac = st.number_input("Budget at Completion (BAC) $",
+            bac = st.number_input("Budget at Completion (BAC)",
                                   min_value=0.0, value=100000.0, step=1000.0,
                                   help="Total planned budget for the entire project")
 
-            pv = st.number_input("Planned Value (PV) $",
+            pv = st.number_input("Planned Value (PV)",
                                  min_value=0.0, value=50000.0, step=1000.0,
                                  help="Budgeted cost of work scheduled to date")
 
-            ev = st.number_input("Earned Value (EV) $",
+            ev = st.number_input("Earned Value (EV)",
                                  min_value=0.0, value=45000.0, step=1000.0,
                                  help="Budgeted cost of work actually completed")
 
-            ac = st.number_input("Actual Cost (AC) $",
+            ac = st.number_input("Actual Cost (AC)",
                                  min_value=0.0, value=55000.0, step=1000.0,
                                  help="Actual cost incurred for work completed")
 
@@ -882,7 +881,7 @@ def main():
         else:  # Multi-Period Analysis
             st.subheader("Project Setup")
 
-            bac = st.number_input("Budget at Completion (BAC) $",
+            bac = st.number_input("Budget at Completion (BAC)",
                                   min_value=0.0, value=100000.0, step=1000.0)
 
             periods = st.number_input("Number of Periods",
@@ -902,9 +901,9 @@ def main():
                 periods_data,
                 column_config={
                     "Period": st.column_config.NumberColumn("Period", disabled=True),
-                    "PV": st.column_config.NumberColumn("Planned Value ($)", min_value=0, format="$%.0f"),
-                    "EV": st.column_config.NumberColumn("Earned Value ($)", min_value=0, format="$%.0f"),
-                    "AC": st.column_config.NumberColumn("Actual Cost ($)", min_value=0, format="$%.0f"),
+                    "PV": st.column_config.NumberColumn("Planned Value", min_value=0, format="%.0f"),
+                    "EV": st.column_config.NumberColumn("Earned Value", min_value=0, format="%.0f"),
+                    "AC": st.column_config.NumberColumn("Actual Cost", min_value=0, format="%.0f"),
                 },
                 hide_index=True,
                 use_container_width=True
@@ -952,15 +951,15 @@ def main():
             col1, col2, col3, col4 = st.columns(4)
 
             with col1:
-                st.metric("Budget at Completion (BAC)", f"${metrics['BAC']:,.0f}")
+                st.metric("Budget at Completion (BAC)", f"{metrics['BAC']:,.0f}")
             with col2:
-                st.metric("Planned Value (PV)", f"${metrics['PV']:,.0f}",
+                st.metric("Planned Value (PV)", f"{metrics['PV']:,.0f}",
                          f"{metrics['PC_planned']:.1f}% complete")
             with col3:
-                st.metric("Earned Value (EV)", f"${metrics['EV']:,.0f}",
+                st.metric("Earned Value (EV)", f"{metrics['EV']:,.0f}",
                          f"{metrics['PC_earned']:.1f}% complete")
             with col4:
-                st.metric("Actual Cost (AC)", f"${metrics['AC']:,.0f}")
+                st.metric("Actual Cost (AC)", f"{metrics['AC']:,.0f}")
 
             st.markdown("---")
 
@@ -982,25 +981,25 @@ def main():
 
             with col1:
                 sv_delta = "Ahead" if metrics['SV'] >= 0 else "Behind"
-                st.metric("Schedule Variance (SV)", f"${metrics['SV']:,.0f}", sv_delta)
+                st.metric("Schedule Variance (SV)", f"{metrics['SV']:,.0f}", sv_delta)
 
             with col2:
                 cv_delta = "Under Budget" if metrics['CV'] >= 0 else "Over Budget"
-                st.metric("Cost Variance (CV)", f"${metrics['CV']:,.0f}", cv_delta)
+                st.metric("Cost Variance (CV)", f"{metrics['CV']:,.0f}", cv_delta)
 
             with col3:
                 vac_delta = "Savings" if metrics['VAC'] >= 0 else "Overrun"
-                st.metric("Variance at Completion (VAC)", f"${metrics['VAC']:,.0f}", vac_delta)
+                st.metric("Variance at Completion (VAC)", f"{metrics['VAC']:,.0f}", vac_delta)
 
             # Forecasts
             st.subheader("Forecasts")
             col1, col2, col3 = st.columns(3)
 
             with col1:
-                st.metric("Estimate at Completion (EAC)", f"${metrics['EAC_typical']:,.0f}",
-                         f"${metrics['EAC_typical'] - metrics['BAC']:+,.0f} vs BAC")
+                st.metric("Estimate at Completion (EAC)", f"{metrics['EAC_typical']:,.0f}",
+                         f"{metrics['EAC_typical'] - metrics['BAC']:+,.0f} vs BAC")
             with col2:
-                st.metric("Estimate to Complete (ETC)", f"${metrics['ETC_typical']:,.0f}")
+                st.metric("Estimate to Complete (ETC)", f"{metrics['ETC_typical']:,.0f}")
             with col3:
                 st.metric("To-Complete Performance Index", f"{metrics['TCPI_BAC']:.2f}",
                          "Required CPI for remaining work")
@@ -1017,20 +1016,20 @@ def main():
             with col1:
                 st.markdown("#### Planned Value (PV)")
                 st.latex(r"PV = \text{Budgeted Cost of Work Scheduled}")
-                st.info(f"**Your Value:** PV = ${metrics['PV']:,.0f}")
+                st.info(f"**Your Value:** PV = {metrics['PV']:,.0f}")
 
                 st.markdown("#### Earned Value (EV)")
                 st.latex(r"EV = \text{Budgeted Cost of Work Performed}")
-                st.info(f"**Your Value:** EV = ${metrics['EV']:,.0f}")
+                st.info(f"**Your Value:** EV = {metrics['EV']:,.0f}")
 
                 st.markdown("#### Actual Cost (AC)")
                 st.latex(r"AC = \text{Actual Cost of Work Performed}")
-                st.info(f"**Your Value:** AC = ${metrics['AC']:,.0f}")
+                st.info(f"**Your Value:** AC = {metrics['AC']:,.0f}")
 
             with col2:
                 st.markdown("#### Budget at Completion (BAC)")
                 st.latex(r"BAC = \text{Total Planned Budget}")
-                st.info(f"**Your Value:** BAC = ${metrics['BAC']:,.0f}")
+                st.info(f"**Your Value:** BAC = {metrics['BAC']:,.0f}")
 
                 st.markdown("#### Percent Complete (Planned)")
                 st.latex(r"\%Complete_{planned} = \frac{PV}{BAC} \times 100")
@@ -1048,7 +1047,7 @@ def main():
             with col1:
                 st.markdown("#### Schedule Variance (SV)")
                 st.latex(r"SV = EV - PV")
-                st.info(f"**Calculation:** ${metrics['EV']:,.0f} - ${metrics['PV']:,.0f} = **${metrics['SV']:,.0f}**")
+                st.info(f"**Calculation:** {metrics['EV']:,.0f} - {metrics['PV']:,.0f} = **{metrics['SV']:,.0f}**")
                 if metrics['SV'] >= 0:
                     st.success("SV ≥ 0: Project is ahead of or on schedule")
                 else:
@@ -1057,7 +1056,7 @@ def main():
             with col2:
                 st.markdown("#### Cost Variance (CV)")
                 st.latex(r"CV = EV - AC")
-                st.info(f"**Calculation:** ${metrics['EV']:,.0f} - ${metrics['AC']:,.0f} = **${metrics['CV']:,.0f}**")
+                st.info(f"**Calculation:** {metrics['EV']:,.0f} - {metrics['AC']:,.0f} = **{metrics['CV']:,.0f}**")
                 if metrics['CV'] >= 0:
                     st.success("CV ≥ 0: Project is under or on budget")
                 else:
@@ -1071,7 +1070,7 @@ def main():
             with col1:
                 st.markdown("#### Schedule Performance Index (SPI)")
                 st.latex(r"SPI = \frac{EV}{PV}")
-                st.info(f"**Calculation:** ${metrics['EV']:,.0f} / ${metrics['PV']:,.0f} = **{metrics['SPI']:.3f}**")
+                st.info(f"**Calculation:** {metrics['EV']:,.0f} / {metrics['PV']:,.0f} = **{metrics['SPI']:.3f}**")
                 if metrics['SPI'] >= 1:
                     st.success("SPI ≥ 1: Getting more work done than planned")
                 else:
@@ -1080,11 +1079,11 @@ def main():
             with col2:
                 st.markdown("#### Cost Performance Index (CPI)")
                 st.latex(r"CPI = \frac{EV}{AC}")
-                st.info(f"**Calculation:** ${metrics['EV']:,.0f} / ${metrics['AC']:,.0f} = **{metrics['CPI']:.3f}**")
+                st.info(f"**Calculation:** {metrics['EV']:,.0f} / {metrics['AC']:,.0f} = **{metrics['CPI']:.3f}**")
                 if metrics['CPI'] >= 1:
-                    st.success("CPI ≥ 1: Getting more value per dollar spent")
+                    st.success("CPI ≥ 1: Getting more value per unit spent")
                 else:
-                    st.error(f"CPI < 1: Only ${metrics['CPI']:.2f} value per dollar spent")
+                    st.error(f"CPI < 1: Only {metrics['CPI']:.2f} value per unit spent")
 
             st.markdown("---")
             st.markdown("### Forecasting")
@@ -1094,28 +1093,28 @@ def main():
             with col1:
                 st.markdown("#### Estimate at Completion (EAC) - Typical Variance")
                 st.latex(r"EAC = \frac{BAC}{CPI}")
-                st.info(f"**Calculation:** ${metrics['BAC']:,.0f} / {metrics['CPI']:.3f} = **${metrics['EAC_typical']:,.0f}**")
+                st.info(f"**Calculation:** {metrics['BAC']:,.0f} / {metrics['CPI']:.3f} = **{metrics['EAC_typical']:,.0f}**")
                 st.caption("Assumes current cost performance will continue")
 
                 st.markdown("#### Estimate at Completion (EAC) - Atypical Variance")
                 st.latex(r"EAC = AC + (BAC - EV)")
-                st.info(f"**Calculation:** ${metrics['AC']:,.0f} + (${metrics['BAC']:,.0f} - ${metrics['EV']:,.0f}) = **${metrics['EAC_atypical']:,.0f}**")
+                st.info(f"**Calculation:** {metrics['AC']:,.0f} + ({metrics['BAC']:,.0f} - {metrics['EV']:,.0f}) = **{metrics['EAC_atypical']:,.0f}**")
                 st.caption("Assumes remaining work at original budget rate")
 
                 st.markdown("#### Estimate at Completion (EAC) - Combined")
                 st.latex(r"EAC = AC + \frac{BAC - EV}{CPI \times SPI}")
-                st.info(f"**Calculation:** ${metrics['AC']:,.0f} + (${metrics['BAC']:,.0f} - ${metrics['EV']:,.0f}) / ({metrics['CPI']:.3f} × {metrics['SPI']:.3f}) = **${metrics['EAC_combined']:,.0f}**")
+                st.info(f"**Calculation:** {metrics['AC']:,.0f} + ({metrics['BAC']:,.0f} - {metrics['EV']:,.0f}) / ({metrics['CPI']:.3f} × {metrics['SPI']:.3f}) = **{metrics['EAC_combined']:,.0f}**")
                 st.caption("Considers both cost and schedule performance")
 
             with col2:
                 st.markdown("#### Estimate to Complete (ETC)")
                 st.latex(r"ETC = EAC - AC")
-                st.info(f"**Calculation:** ${metrics['EAC_typical']:,.0f} - ${metrics['AC']:,.0f} = **${metrics['ETC_typical']:,.0f}**")
+                st.info(f"**Calculation:** {metrics['EAC_typical']:,.0f} - {metrics['AC']:,.0f} = **{metrics['ETC_typical']:,.0f}**")
                 st.caption("Amount needed to complete the project")
 
                 st.markdown("#### Variance at Completion (VAC)")
                 st.latex(r"VAC = BAC - EAC")
-                st.info(f"**Calculation:** ${metrics['BAC']:,.0f} - ${metrics['EAC_typical']:,.0f} = **${metrics['VAC']:,.0f}**")
+                st.info(f"**Calculation:** {metrics['BAC']:,.0f} - {metrics['EAC_typical']:,.0f} = **{metrics['VAC']:,.0f}**")
                 if metrics['VAC'] >= 0:
                     st.success("VAC ≥ 0: Expected to finish under budget")
                 else:
@@ -1123,7 +1122,7 @@ def main():
 
                 st.markdown("#### To-Complete Performance Index (TCPI)")
                 st.latex(r"TCPI_{BAC} = \frac{BAC - EV}{BAC - AC}")
-                st.info(f"**Calculation:** (${metrics['BAC']:,.0f} - ${metrics['EV']:,.0f}) / (${metrics['BAC']:,.0f} - ${metrics['AC']:,.0f}) = **{metrics['TCPI_BAC']:.3f}**")
+                st.info(f"**Calculation:** ({metrics['BAC']:,.0f} - {metrics['EV']:,.0f}) / ({metrics['BAC']:,.0f} - {metrics['AC']:,.0f}) = **{metrics['TCPI_BAC']:.3f}**")
                 if metrics['TCPI_BAC'] <= 1.1:
                     st.success("TCPI ≤ 1.1: Target is achievable")
                 else:
@@ -1150,8 +1149,7 @@ def main():
                     earned_value_data=periods_data['EV_cumulative'].tolist(),
                     current_period=current_period_idx,
                     bac=bac,
-                    eac=metrics['EAC_typical'],
-                    currency="$"
+                    eac=metrics['EAC_typical']
                 )
                 st.plotly_chart(fig_classic, use_container_width=True)
 
@@ -1311,7 +1309,7 @@ def main():
 
             # Schedule Variance
             interpretation, status = interpret_metric('SV', metrics['SV'])
-            st.markdown(f"#### Schedule Variance (SV) = ${metrics['SV']:,.0f}")
+            st.markdown(f"#### Schedule Variance (SV) = {metrics['SV']:,.0f}")
             if status == "good":
                 st.success(interpretation)
             elif status == "bad":
@@ -1321,7 +1319,7 @@ def main():
 
             # Cost Variance
             interpretation, status = interpret_metric('CV', metrics['CV'])
-            st.markdown(f"#### Cost Variance (CV) = ${metrics['CV']:,.0f}")
+            st.markdown(f"#### Cost Variance (CV) = {metrics['CV']:,.0f}")
             if status == "good":
                 st.success(interpretation)
             elif status == "bad":
@@ -1353,12 +1351,12 @@ def main():
             st.markdown("---")
             st.markdown("### Forecast Analysis")
 
-            st.markdown(f"#### Estimate at Completion (EAC) = ${metrics['EAC_typical']:,.0f}")
+            st.markdown(f"#### Estimate at Completion (EAC) = {metrics['EAC_typical']:,.0f}")
             variance_pct = ((metrics['EAC_typical'] - metrics['BAC']) / metrics['BAC']) * 100
             if metrics['EAC_typical'] <= metrics['BAC']:
-                st.success(f"✅ **Good News**: The project is forecasted to complete ${metrics['BAC'] - metrics['EAC_typical']:,.0f} ({abs(variance_pct):.1f}%) under the original budget.")
+                st.success(f"✅ **Good News**: The project is forecasted to complete {metrics['BAC'] - metrics['EAC_typical']:,.0f} ({abs(variance_pct):.1f}%) under the original budget.")
             else:
-                st.error(f"⚠️ **Warning**: The project is forecasted to exceed the original budget by ${metrics['EAC_typical'] - metrics['BAC']:,.0f} ({variance_pct:.1f}%). Consider scope reduction or additional funding.")
+                st.error(f"⚠️ **Warning**: The project is forecasted to exceed the original budget by {metrics['EAC_typical'] - metrics['BAC']:,.0f} ({variance_pct:.1f}%). Consider scope reduction or additional funding.")
 
             # TCPI Analysis
             st.markdown(f"#### To-Complete Performance Index (TCPI) = {metrics['TCPI_BAC']:.3f}")
