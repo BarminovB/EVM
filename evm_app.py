@@ -9,11 +9,8 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
-from fpdf import FPDF
-import tempfile
-import os
-from io import BytesIO
 from datetime import datetime
+import base64
 
 # Page configuration
 st.set_page_config(
@@ -885,316 +882,237 @@ def create_gauge_chart(value: float, title: str, min_val: float = 0, max_val: fl
     return fig
 
 
-# ==================== PDF REPORT GENERATION ====================
+# ==================== HTML REPORT GENERATION ====================
 
-class EVMReport(FPDF):
-    """Custom PDF class for EVM reports"""
+def generate_html_report(metrics: dict, periods_data: pd.DataFrame = None) -> str:
+    """Generate a comprehensive HTML report for EVM analysis"""
 
-    def __init__(self):
-        super().__init__()
-        self.set_auto_page_break(auto=True, margin=15)
+    # Determine project status
+    spi = metrics['SPI']
+    cpi = metrics['CPI']
 
-    def header(self):
-        self.set_font('Helvetica', 'B', 12)
-        self.cell(0, 10, 'EVM Report - Earned Value Management Analysis', 0, 1, 'C')
-        self.set_font('Helvetica', '', 8)
-        self.cell(0, 5, f'Generated: {datetime.now().strftime("%Y-%m-%d %H:%M")}', 0, 1, 'C')
-        self.ln(5)
+    if spi >= 1 and cpi >= 1:
+        status = "EXCELLENT - Project is ahead of schedule AND under budget"
+        status_color = "#28a745"
+    elif spi >= 1 and cpi < 1:
+        status = "ATTENTION - Ahead of schedule but over budget"
+        status_color = "#ffc107"
+    elif spi < 1 and cpi >= 1:
+        status = "ATTENTION - Under budget but behind schedule"
+        status_color = "#ffc107"
+    else:
+        status = "CRITICAL - Behind schedule AND over budget"
+        status_color = "#dc3545"
 
-    def footer(self):
-        self.set_y(-15)
-        self.set_font('Helvetica', 'I', 8)
-        self.cell(0, 10, f'Page {self.page_no()}/{{nb}}', 0, 0, 'C')
+    # Build recommendations
+    recommendations = []
+    if metrics['SPI'] < 1:
+        recommendations.append("Schedule Recovery: Consider adding resources, working overtime, or fast-tracking activities.")
+    if metrics['CPI'] < 1:
+        recommendations.append("Cost Control: Review and reduce non-essential expenses, negotiate with vendors.")
+    if metrics['TCPI_BAC'] > 1.2:
+        recommendations.append("Re-baseline: The required future performance may be unrealistic.")
+    if metrics['SPI'] >= 1 and metrics['CPI'] >= 1:
+        recommendations.append("Maintain Performance: Continue current management practices.")
+    if metrics['VAC'] < 0:
+        recommendations.append("Request Additional Funding: Prepare a change request for additional budget.")
 
-    def chapter_title(self, title: str):
-        self.set_font('Helvetica', 'B', 14)
-        self.set_fill_color(240, 240, 240)
-        self.cell(0, 10, title, 0, 1, 'L', fill=True)
-        self.ln(4)
+    recommendations_html = "".join([f"<li>{r}</li>" for r in recommendations]) if recommendations else "<li>Project is performing well.</li>"
 
-    def section_title(self, title: str):
-        self.set_font('Helvetica', 'B', 11)
-        self.cell(0, 8, title, 0, 1, 'L')
-        self.ln(2)
+    # Build periods table if available
+    periods_table_html = ""
+    if periods_data is not None and len(periods_data) > 0:
+        periods_rows = ""
+        for _, row in periods_data.iterrows():
+            periods_rows += f"""
+            <tr>
+                <td>{int(row['Period'])}</td>
+                <td>{row['PV_cumulative']:,.0f}</td>
+                <td>{row['EV_cumulative']:,.0f}</td>
+                <td>{row['AC_cumulative']:,.0f}</td>
+                <td>{row['SV']:+,.0f}</td>
+                <td>{row['CV']:+,.0f}</td>
+                <td>{row['SPI']:.2f}</td>
+                <td>{row['CPI']:.2f}</td>
+            </tr>
+            """
+        periods_table_html = f"""
+        <h2>4. Period-by-Period Data</h2>
+        <table>
+            <tr>
+                <th>Period</th><th>PV</th><th>EV</th><th>AC</th>
+                <th>SV</th><th>CV</th><th>SPI</th><th>CPI</th>
+            </tr>
+            {periods_rows}
+        </table>
+        """
 
-    def add_metric_row(self, label: str, value: str, interpretation: str = ""):
-        self.set_font('Helvetica', 'B', 10)
-        self.cell(60, 7, label, 0, 0)
-        self.set_font('Helvetica', '', 10)
-        self.cell(40, 7, value, 0, 0)
-        if interpretation:
-            self.set_font('Helvetica', 'I', 9)
-            self.multi_cell(0, 7, interpretation)
-        else:
-            self.ln()
+    html = f"""
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EVM Report - {datetime.now().strftime('%Y-%m-%d')}</title>
+    <style>
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1000px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }}
+        .report {{
+            background: white;
+            padding: 40px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }}
+        h1 {{
+            color: #1a365d;
+            border-bottom: 3px solid #3182ce;
+            padding-bottom: 10px;
+            margin-bottom: 20px;
+        }}
+        h2 {{
+            color: #2d3748;
+            background: #edf2f7;
+            padding: 10px 15px;
+            margin: 30px 0 15px 0;
+            border-left: 4px solid #3182ce;
+        }}
+        .meta {{
+            color: #718096;
+            margin-bottom: 20px;
+        }}
+        .status {{
+            padding: 15px;
+            border-radius: 6px;
+            font-weight: bold;
+            font-size: 1.1em;
+            margin: 20px 0;
+        }}
+        table {{
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }}
+        th, td {{
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e2e8f0;
+        }}
+        th {{
+            background: #3182ce;
+            color: white;
+            font-weight: 600;
+        }}
+        tr:nth-child(even) {{
+            background: #f7fafc;
+        }}
+        tr:hover {{
+            background: #edf2f7;
+        }}
+        .metric-value {{
+            font-weight: bold;
+            font-family: 'Consolas', monospace;
+        }}
+        .positive {{ color: #28a745; }}
+        .negative {{ color: #dc3545; }}
+        ul {{
+            margin: 15px 0;
+            padding-left: 25px;
+        }}
+        li {{
+            margin: 8px 0;
+        }}
+        .formula {{
+            font-family: 'Consolas', monospace;
+            background: #f7fafc;
+            padding: 2px 6px;
+            border-radius: 3px;
+        }}
+        .footer {{
+            margin-top: 40px;
+            padding-top: 20px;
+            border-top: 1px solid #e2e8f0;
+            text-align: center;
+            color: #718096;
+            font-size: 0.9em;
+        }}
+        @media print {{
+            body {{ background: white; }}
+            .report {{ box-shadow: none; }}
+            h2 {{ page-break-after: avoid; }}
+            table {{ page-break-inside: avoid; }}
+        }}
+    </style>
+</head>
+<body>
+    <div class="report">
+        <h1>EVM Report - Earned Value Management Analysis</h1>
+        <p class="meta">Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
 
-    def add_table(self, headers: list, data: list, col_widths: list = None):
-        if col_widths is None:
-            col_widths = [190 // len(headers)] * len(headers)
+        <h2>1. Executive Summary</h2>
+        <div class="status" style="background: {status_color}20; border-left: 4px solid {status_color}; color: {status_color};">
+            Project Status: {status}
+        </div>
 
-        # Header
-        self.set_font('Helvetica', 'B', 9)
-        self.set_fill_color(66, 139, 202)
-        self.set_text_color(255, 255, 255)
-        for i, header in enumerate(headers):
-            self.cell(col_widths[i], 8, header, 1, 0, 'C', fill=True)
-        self.ln()
+        <h2>2. Key Performance Metrics</h2>
+        <table>
+            <tr><th>Metric</th><th>Value</th><th>Status</th></tr>
+            <tr><td>Budget at Completion (BAC)</td><td class="metric-value">{metrics['BAC']:,.0f}</td><td>Baseline</td></tr>
+            <tr><td>Planned Value (PV)</td><td class="metric-value">{metrics['PV']:,.0f}</td><td>{metrics['PC_planned']:.1f}% planned</td></tr>
+            <tr><td>Earned Value (EV)</td><td class="metric-value">{metrics['EV']:,.0f}</td><td>{metrics['PC_earned']:.1f}% earned</td></tr>
+            <tr><td>Actual Cost (AC)</td><td class="metric-value">{metrics['AC']:,.0f}</td><td>Spent to date</td></tr>
+            <tr><td>Schedule Variance (SV)</td><td class="metric-value {'positive' if metrics['SV'] >= 0 else 'negative'}">{metrics['SV']:+,.0f}</td><td>{'Ahead' if metrics['SV'] >= 0 else 'Behind'} of schedule</td></tr>
+            <tr><td>Cost Variance (CV)</td><td class="metric-value {'positive' if metrics['CV'] >= 0 else 'negative'}">{metrics['CV']:+,.0f}</td><td>{'Under' if metrics['CV'] >= 0 else 'Over'} budget</td></tr>
+            <tr><td>Schedule Performance Index (SPI)</td><td class="metric-value {'positive' if metrics['SPI'] >= 1 else 'negative'}">{metrics['SPI']:.3f}</td><td>{'On/Ahead' if metrics['SPI'] >= 1 else 'Behind'} schedule</td></tr>
+            <tr><td>Cost Performance Index (CPI)</td><td class="metric-value {'positive' if metrics['CPI'] >= 1 else 'negative'}">{metrics['CPI']:.3f}</td><td>{'On/Under' if metrics['CPI'] >= 1 else 'Over'} budget</td></tr>
+        </table>
 
-        # Data rows
-        self.set_font('Helvetica', '', 9)
-        self.set_text_color(0, 0, 0)
-        fill = False
-        for row in data:
-            if fill:
-                self.set_fill_color(245, 245, 245)
-            else:
-                self.set_fill_color(255, 255, 255)
-            for i, cell in enumerate(row):
-                self.cell(col_widths[i], 7, str(cell), 1, 0, 'C', fill=True)
-            self.ln()
-            fill = not fill
+        <h2>3. Forecast Metrics</h2>
+        <table>
+            <tr><th>Metric</th><th>Value</th><th>Interpretation</th></tr>
+            <tr><td>Estimate at Completion (EAC)</td><td class="metric-value">{metrics['EAC_typical']:,.0f}</td><td>Forecasted total cost</td></tr>
+            <tr><td>Estimate to Complete (ETC)</td><td class="metric-value">{metrics['ETC_typical']:,.0f}</td><td>Remaining cost to finish</td></tr>
+            <tr><td>Variance at Completion (VAC)</td><td class="metric-value {'positive' if metrics['VAC'] >= 0 else 'negative'}">{metrics['VAC']:+,.0f}</td><td>{'Savings' if metrics['VAC'] >= 0 else 'Overrun'} expected</td></tr>
+            <tr><td>To-Complete Performance Index (TCPI)</td><td class="metric-value">{metrics['TCPI_BAC']:.3f}</td><td>Required CPI for remaining work</td></tr>
+        </table>
 
+        {periods_table_html}
 
-def generate_pdf_report(
-    metrics: dict,
-    periods_data: pd.DataFrame = None,
-    fig_evm_chart: go.Figure = None,
-    fig_forecast: go.Figure = None,
-    fig_spi_gauge: go.Figure = None,
-    fig_cpi_gauge: go.Figure = None
-) -> bytes:
-    """Generate a comprehensive PDF report for EVM analysis"""
+        <h2>{'5' if periods_data is not None and len(periods_data) > 0 else '4'}. Recommendations</h2>
+        <ul>
+            {recommendations_html}
+        </ul>
 
-    pdf = EVMReport()
-    pdf.alias_nb_pages()
+        <h2>{'6' if periods_data is not None and len(periods_data) > 0 else '5'}. EVM Formulas Reference</h2>
+        <table>
+            <tr><th>Metric</th><th>Formula</th><th>Interpretation</th></tr>
+            <tr><td>Schedule Variance</td><td class="formula">SV = EV - PV</td><td>Positive = Ahead, Negative = Behind</td></tr>
+            <tr><td>Cost Variance</td><td class="formula">CV = EV - AC</td><td>Positive = Under budget, Negative = Over</td></tr>
+            <tr><td>Schedule Performance Index</td><td class="formula">SPI = EV / PV</td><td>&gt; 1 = Ahead, &lt; 1 = Behind</td></tr>
+            <tr><td>Cost Performance Index</td><td class="formula">CPI = EV / AC</td><td>&gt; 1 = Under budget, &lt; 1 = Over</td></tr>
+            <tr><td>Estimate at Completion</td><td class="formula">EAC = BAC / CPI</td><td>Forecasted total cost</td></tr>
+            <tr><td>Estimate to Complete</td><td class="formula">ETC = EAC - AC</td><td>Cost to finish</td></tr>
+            <tr><td>Variance at Completion</td><td class="formula">VAC = BAC - EAC</td><td>Expected variance at end</td></tr>
+            <tr><td>To-Complete Performance Index</td><td class="formula">TCPI = (BAC-EV) / (BAC-AC)</td><td>Required CPI to meet budget</td></tr>
+        </table>
 
-    # Create temporary directory for chart images
-    with tempfile.TemporaryDirectory() as tmp_dir:
+        <div class="footer">
+            <p>Generated by EVM Calculator - Based on IPMA Standards</p>
+            <p>Developed by Boris Taliev</p>
+        </div>
+    </div>
+</body>
+</html>
+    """
 
-        # === PAGE 1: Executive Summary ===
-        pdf.add_page()
-
-        pdf.chapter_title("1. Executive Summary")
-
-        # Project Status
-        spi = metrics['SPI']
-        cpi = metrics['CPI']
-
-        if spi >= 1 and cpi >= 1:
-            status = "EXCELLENT - Project is ahead of schedule AND under budget"
-            status_color = (0, 128, 0)
-        elif spi >= 1 and cpi < 1:
-            status = "ATTENTION - Ahead of schedule but over budget"
-            status_color = (255, 165, 0)
-        elif spi < 1 and cpi >= 1:
-            status = "ATTENTION - Under budget but behind schedule"
-            status_color = (255, 165, 0)
-        else:
-            status = "CRITICAL - Behind schedule AND over budget"
-            status_color = (220, 53, 69)
-
-        pdf.set_font('Helvetica', 'B', 12)
-        pdf.set_text_color(*status_color)
-        pdf.cell(0, 10, f"Project Status: {status}", 0, 1, 'L')
-        pdf.set_text_color(0, 0, 0)
-        pdf.ln(5)
-
-        # Key Metrics Table
-        pdf.section_title("Key Performance Metrics")
-
-        key_metrics = [
-            ["BAC (Budget at Completion)", f"{metrics['BAC']:,.0f}"],
-            ["PV (Planned Value)", f"{metrics['PV']:,.0f}"],
-            ["EV (Earned Value)", f"{metrics['EV']:,.0f}"],
-            ["AC (Actual Cost)", f"{metrics['AC']:,.0f}"],
-            ["SV (Schedule Variance)", f"{metrics['SV']:+,.0f}"],
-            ["CV (Cost Variance)", f"{metrics['CV']:+,.0f}"],
-            ["SPI (Schedule Performance Index)", f"{metrics['SPI']:.3f}"],
-            ["CPI (Cost Performance Index)", f"{metrics['CPI']:.3f}"],
-        ]
-
-        pdf.add_table(["Metric", "Value"], key_metrics, [120, 70])
-        pdf.ln(10)
-
-        # Forecast Metrics
-        pdf.section_title("Forecast Metrics")
-
-        forecast_metrics = [
-            ["EAC (Estimate at Completion)", f"{metrics['EAC_typical']:,.0f}"],
-            ["ETC (Estimate to Complete)", f"{metrics['ETC_typical']:,.0f}"],
-            ["VAC (Variance at Completion)", f"{metrics['VAC']:+,.0f}"],
-            ["TCPI (To-Complete Performance Index)", f"{metrics['TCPI_BAC']:.3f}"],
-        ]
-
-        pdf.add_table(["Metric", "Value"], forecast_metrics, [120, 70])
-
-        # === PAGE 2: Charts ===
-        pdf.add_page()
-        pdf.chapter_title("2. Visual Analysis")
-
-        # Export and add EVM chart
-        if fig_evm_chart is not None:
-            try:
-                evm_chart_path = os.path.join(tmp_dir, "evm_chart.png")
-                fig_evm_chart.write_image(evm_chart_path, width=1200, height=600, scale=2)
-                pdf.section_title("EVM Performance Chart")
-                pdf.image(evm_chart_path, x=10, w=190)
-                pdf.ln(5)
-            except Exception as e:
-                pdf.set_font('Helvetica', 'I', 10)
-                pdf.cell(0, 10, f"Chart could not be exported: {str(e)}", 0, 1)
-
-        # Export and add forecast chart
-        if fig_forecast is not None:
-            try:
-                forecast_path = os.path.join(tmp_dir, "forecast_chart.png")
-                fig_forecast.write_image(forecast_path, width=1000, height=400, scale=2)
-                pdf.section_title("Budget vs. Forecast Comparison")
-                pdf.image(forecast_path, x=10, w=190)
-            except Exception as e:
-                pdf.set_font('Helvetica', 'I', 10)
-                pdf.cell(0, 10, f"Chart could not be exported: {str(e)}", 0, 1)
-
-        # === PAGE 3: Performance Indices ===
-        pdf.add_page()
-        pdf.chapter_title("3. Performance Indices")
-
-        # SPI and CPI gauges side by side
-        gauge_y = pdf.get_y()
-
-        if fig_spi_gauge is not None:
-            try:
-                spi_path = os.path.join(tmp_dir, "spi_gauge.png")
-                fig_spi_gauge.write_image(spi_path, width=400, height=300, scale=2)
-                pdf.image(spi_path, x=10, y=gauge_y, w=90)
-            except Exception:
-                pass
-
-        if fig_cpi_gauge is not None:
-            try:
-                cpi_path = os.path.join(tmp_dir, "cpi_gauge.png")
-                fig_cpi_gauge.write_image(cpi_path, width=400, height=300, scale=2)
-                pdf.image(cpi_path, x=105, y=gauge_y, w=90)
-            except Exception:
-                pass
-
-        pdf.set_y(gauge_y + 75)
-        pdf.ln(10)
-
-        # Interpretations
-        pdf.section_title("Interpretations")
-
-        # SPI interpretation
-        pdf.set_font('Helvetica', 'B', 10)
-        pdf.cell(0, 7, f"Schedule Performance Index (SPI) = {metrics['SPI']:.3f}", 0, 1)
-        pdf.set_font('Helvetica', '', 10)
-        if metrics['SPI'] >= 1:
-            pdf.multi_cell(0, 6, "The project is ahead of schedule. For every unit of work planned, more than one unit is being accomplished.")
-        else:
-            pdf.multi_cell(0, 6, f"The project is behind schedule. Only {metrics['SPI']*100:.1f}% of planned work rate is being achieved.")
-        pdf.ln(3)
-
-        # CPI interpretation
-        pdf.set_font('Helvetica', 'B', 10)
-        pdf.cell(0, 7, f"Cost Performance Index (CPI) = {metrics['CPI']:.3f}", 0, 1)
-        pdf.set_font('Helvetica', '', 10)
-        if metrics['CPI'] >= 1:
-            pdf.multi_cell(0, 6, "The project is under budget. For every unit spent, more than one unit of value is being earned.")
-        else:
-            pdf.multi_cell(0, 6, f"The project is over budget. For every unit spent, only {metrics['CPI']:.2f} of value is being earned.")
-        pdf.ln(3)
-
-        # TCPI interpretation
-        pdf.set_font('Helvetica', 'B', 10)
-        pdf.cell(0, 7, f"To-Complete Performance Index (TCPI) = {metrics['TCPI_BAC']:.3f}", 0, 1)
-        pdf.set_font('Helvetica', '', 10)
-        if metrics['TCPI_BAC'] <= 1.1:
-            pdf.multi_cell(0, 6, f"The required future efficiency ({metrics['TCPI_BAC']:.2f}) is achievable to meet the original budget.")
-        else:
-            pdf.multi_cell(0, 6, f"A CPI of {metrics['TCPI_BAC']:.2f} is required for remaining work - this may be difficult to achieve.")
-
-        # === PAGE 4: Detailed Data (if available) ===
-        if periods_data is not None and len(periods_data) > 0:
-            pdf.add_page()
-            pdf.chapter_title("4. Period-by-Period Data")
-
-            # Prepare data for table
-            headers = ["Period", "PV", "EV", "AC", "SV", "CV", "SPI", "CPI"]
-            table_data = []
-
-            for _, row in periods_data.iterrows():
-                table_data.append([
-                    f"{int(row['Period'])}",
-                    f"{row['PV_cumulative']:,.0f}",
-                    f"{row['EV_cumulative']:,.0f}",
-                    f"{row['AC_cumulative']:,.0f}",
-                    f"{row['SV']:+,.0f}",
-                    f"{row['CV']:+,.0f}",
-                    f"{row['SPI']:.2f}",
-                    f"{row['CPI']:.2f}"
-                ])
-
-            col_widths = [20, 25, 25, 25, 25, 25, 22, 22]
-            pdf.add_table(headers, table_data, col_widths)
-
-        # === PAGE 5: Recommendations ===
-        pdf.add_page()
-        pdf.chapter_title("5. Recommendations")
-
-        recommendations = []
-
-        if metrics['SPI'] < 1:
-            recommendations.append(
-                "Schedule Recovery: Consider adding resources, working overtime, or fast-tracking activities to recover schedule."
-            )
-        if metrics['CPI'] < 1:
-            recommendations.append(
-                "Cost Control: Review and reduce non-essential expenses, negotiate with vendors, or consider value engineering."
-            )
-        if metrics['TCPI_BAC'] > 1.2:
-            recommendations.append(
-                "Re-baseline: The required future performance may be unrealistic. Consider re-baselining the project with stakeholder approval."
-            )
-        if metrics['SPI'] >= 1 and metrics['CPI'] >= 1:
-            recommendations.append(
-                "Maintain Performance: Continue current management practices. Monitor for any emerging issues."
-            )
-        if metrics['VAC'] < 0:
-            recommendations.append(
-                "Request Additional Funding: If cost overrun cannot be avoided, prepare a change request for additional budget."
-            )
-
-        if not recommendations:
-            recommendations.append("No specific recommendations at this time. Project is performing well.")
-
-        for i, rec in enumerate(recommendations, 1):
-            pdf.set_font('Helvetica', 'B', 10)
-            pdf.cell(10, 7, f"{i}.", 0, 0)
-            pdf.set_font('Helvetica', '', 10)
-            pdf.multi_cell(0, 7, rec)
-            pdf.ln(3)
-
-        # === FINAL PAGE: Formulas Reference ===
-        pdf.add_page()
-        pdf.chapter_title("6. EVM Formulas Reference")
-
-        formulas = [
-            ["Schedule Variance (SV)", "SV = EV - PV", "Positive = Ahead, Negative = Behind"],
-            ["Cost Variance (CV)", "CV = EV - AC", "Positive = Under budget, Negative = Over budget"],
-            ["Schedule Performance Index (SPI)", "SPI = EV / PV", "> 1 = Ahead, < 1 = Behind"],
-            ["Cost Performance Index (CPI)", "CPI = EV / AC", "> 1 = Under budget, < 1 = Over budget"],
-            ["Estimate at Completion (EAC)", "EAC = BAC / CPI", "Forecasted total cost"],
-            ["Estimate to Complete (ETC)", "ETC = EAC - AC", "Cost to finish"],
-            ["Variance at Completion (VAC)", "VAC = BAC - EAC", "Expected variance at end"],
-            ["To-Complete Performance Index", "TCPI = (BAC-EV) / (BAC-AC)", "Required CPI to meet budget"],
-        ]
-
-        pdf.add_table(["Metric", "Formula", "Interpretation"], formulas, [60, 55, 75])
-
-        # Generate PDF bytes
-        pdf_output = pdf.output()
-
-    return bytes(pdf_output)
+    return html
 
 
 # ==================== MAIN APPLICATION ====================
@@ -1398,61 +1316,22 @@ def main():
                 st.metric("To-Complete Performance Index", f"{metrics['TCPI_BAC']:.2f}",
                          "Required CPI for remaining work")
 
-            # PDF Report Download Section
+            # HTML Report Download Section
             st.markdown("---")
-            st.subheader("📄 Generate Report")
+            st.subheader("📄 Download Report")
 
-            if st.button("📥 Download PDF Report", type="secondary", use_container_width=True):
-                with st.spinner("Generating PDF report..."):
-                    try:
-                        # Create charts for PDF
-                        fig_spi_pdf = create_gauge_chart(metrics['SPI'], "Schedule Performance Index (SPI)")
-                        fig_cpi_pdf = create_gauge_chart(metrics['CPI'], "Cost Performance Index (CPI)")
-                        fig_forecast_pdf = create_forecast_chart(metrics['BAC'], metrics['EAC_typical'],
-                                                                  metrics['AC'], metrics['EV'])
+            # Generate HTML report
+            html_report = generate_html_report(metrics=metrics, periods_data=periods_data)
 
-                        # Create EVM chart if periods data available
-                        fig_evm_pdf = None
-                        if periods_data is not None and len(periods_data) > 0:
-                            current_period_idx = len(periods_data)
-                            for i in range(len(periods_data) - 1, -1, -1):
-                                if periods_data['EV_cumulative'].iloc[i] > 0:
-                                    current_period_idx = i + 1
-                                    break
-
-                            fig_evm_pdf = create_classic_evm_chart(
-                                planned_value_data=periods_data['PV_cumulative'].tolist(),
-                                actual_cost_data=periods_data['AC_cumulative'].tolist(),
-                                earned_value_data=periods_data['EV_cumulative'].tolist(),
-                                current_period=current_period_idx,
-                                bac=bac,
-                                eac=metrics['EAC_typical']
-                            )
-
-                        # Generate PDF
-                        pdf_bytes = generate_pdf_report(
-                            metrics=metrics,
-                            periods_data=periods_data,
-                            fig_evm_chart=fig_evm_pdf,
-                            fig_forecast=fig_forecast_pdf,
-                            fig_spi_gauge=fig_spi_pdf,
-                            fig_cpi_gauge=fig_cpi_pdf
-                        )
-
-                        # Offer download
-                        st.download_button(
-                            label="💾 Save PDF Report",
-                            data=pdf_bytes,
-                            file_name=f"EVM_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf",
-                            mime="application/pdf",
-                            type="primary",
-                            use_container_width=True
-                        )
-                        st.success("PDF report generated successfully! Click the button above to download.")
-
-                    except Exception as e:
-                        st.error(f"Error generating PDF: {str(e)}")
-                        st.info("Make sure 'kaleido' is installed: pip install kaleido")
+            st.download_button(
+                label="📥 Download HTML Report",
+                data=html_report,
+                file_name=f"EVM_Report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html",
+                mime="text/html",
+                type="secondary",
+                use_container_width=True
+            )
+            st.caption("Open in browser and use Ctrl+P to print or save as PDF")
 
         # ==================== TAB 2: FORMULAS ====================
         with tab2:
