@@ -9,6 +9,10 @@ import numpy as np
 import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
+import json
+from datetime import datetime
+from scipy import stats
+from io import BytesIO
 
 # Page configuration
 st.set_page_config(
@@ -465,16 +469,401 @@ def create_gauge_chart(value: float, title: str, min_val: float = 0, max_val: fl
     return fig
 
 
+# ==================== PROJECT PERSISTENCE FUNCTIONS ====================
+
+def create_project_json(project_name: str, bac: float, periods_data: pd.DataFrame,
+                        notes: str = "") -> str:
+    """Create JSON string for project export"""
+    project_data = {
+        "version": "1.0",
+        "project_name": project_name,
+        "created_date": datetime.now().isoformat(),
+        "bac": bac,
+        "periods_data": {
+            "Period": periods_data['Period'].tolist(),
+            "PV": periods_data['PV'].tolist(),
+            "EV": periods_data['EV'].tolist(),
+            "AC": periods_data['AC'].tolist()
+        },
+        "notes": notes
+    }
+    return json.dumps(project_data, indent=2, ensure_ascii=False)
+
+
+def load_project_json(json_content: str) -> dict:
+    """Parse and validate uploaded JSON project file"""
+    try:
+        data = json.loads(json_content)
+        is_valid, error = validate_project_data(data)
+        if not is_valid:
+            return {"success": False, "error_message": error}
+
+        periods_data = pd.DataFrame(data["periods_data"])
+        return {
+            "success": True,
+            "project_name": data.get("project_name", "Loaded Project"),
+            "bac": data["bac"],
+            "periods_data": periods_data,
+            "created_date": data.get("created_date", ""),
+            "notes": data.get("notes", "")
+        }
+    except json.JSONDecodeError as e:
+        return {"success": False, "error_message": f"Invalid JSON: {e}"}
+    except Exception as e:
+        return {"success": False, "error_message": f"Error loading project: {e}"}
+
+
+def validate_project_data(data: dict) -> tuple:
+    """Validate project JSON structure"""
+    required_fields = ["bac", "periods_data"]
+    for field in required_fields:
+        if field not in data:
+            return False, f"Missing required field: {field}"
+
+    periods_data = data["periods_data"]
+    required_columns = ["Period", "PV", "EV", "AC"]
+    for col in required_columns:
+        if col not in periods_data:
+            return False, f"Missing column in periods_data: {col}"
+
+    if data["bac"] <= 0:
+        return False, "BAC must be positive"
+
+    return True, ""
+
+
+# ==================== EARNED SCHEDULE FUNCTIONS ====================
+
+def calculate_earned_schedule(periods_data: pd.DataFrame, current_period: int) -> dict:
+    """
+    Calculate Earned Schedule (ES) metrics.
+    ES = time when PV equals current EV (interpolated)
+    """
+    if periods_data is None or len(periods_data) < 2:
+        return None
+
+    ev_current = periods_data.loc[current_period - 1, 'EV_cumulative']
+    pv_cumulative = periods_data['PV_cumulative'].values
+
+    # Find ES - the time when PV equals current EV
+    es = 0
+    for i, pv_val in enumerate(pv_cumulative):
+        if pv_val >= ev_current:
+            if i == 0:
+                es = (ev_current / pv_val) if pv_val > 0 else 0
+            else:
+                pv_prev = pv_cumulative[i - 1]
+                if pv_val - pv_prev > 0:
+                    fraction = (ev_current - pv_prev) / (pv_val - pv_prev)
+                    es = i + fraction
+                else:
+                    es = i
+            break
+    else:
+        es = len(pv_cumulative)
+
+    at = current_period
+    pd_total = len(periods_data)
+
+    sv_t = es - at
+    spi_t = es / at if at > 0 else 0
+
+    remaining = pd_total - es
+    if spi_t > 0:
+        eac_t = at + remaining / spi_t
+    else:
+        eac_t = float('inf')
+
+    return {
+        'ES': es,
+        'AT': at,
+        'PD': pd_total,
+        'SV_t': sv_t,
+        'SPI_t': spi_t,
+        'EAC_t': eac_t if eac_t != float('inf') else None
+    }
+
+
+# ==================== TREND ANALYSIS FUNCTIONS ====================
+
+def calculate_trend_regression(periods: np.ndarray, values: np.ndarray,
+                               forecast_periods: int = 3) -> dict:
+    """Calculate linear regression with confidence intervals"""
+    if len(periods) < 2:
+        return None
+
+    slope, intercept, r_value, p_value, std_err = stats.linregress(periods, values)
+
+    # Forecast future values
+    future_periods = np.arange(periods[-1] + 1, periods[-1] + forecast_periods + 1)
+    all_periods = np.concatenate([periods, future_periods])
+    fitted_values = slope * all_periods + intercept
+
+    # Calculate confidence interval (95%)
+    n = len(periods)
+    mean_x = np.mean(periods)
+    se_y = np.sqrt(np.sum((values - (slope * periods + intercept))**2) / (n - 2)) if n > 2 else std_err
+
+    t_val = stats.t.ppf(0.975, n - 2) if n > 2 else 1.96
+
+    confidence_interval = []
+    for x in all_periods:
+        se_fit = se_y * np.sqrt(1/n + (x - mean_x)**2 / np.sum((periods - mean_x)**2))
+        confidence_interval.append(t_val * se_fit)
+
+    confidence_interval = np.array(confidence_interval)
+
+    return {
+        'slope': slope,
+        'intercept': intercept,
+        'r_squared': r_value**2,
+        'all_periods': all_periods,
+        'fitted_values': fitted_values,
+        'forecast_periods': future_periods,
+        'forecast_values': fitted_values[-forecast_periods:],
+        'confidence_lower': fitted_values - confidence_interval,
+        'confidence_upper': fitted_values + confidence_interval
+    }
+
+
+def create_s_curve_with_trends(periods_data: pd.DataFrame, bac: float,
+                               forecast_periods: int = 3) -> go.Figure:
+    """Create S-Curve with trend lines and forecasts"""
+    fig = go.Figure()
+
+    periods = periods_data['Period'].values
+
+    # Original data traces
+    fig.add_trace(go.Scatter(
+        x=periods, y=periods_data['PV_cumulative'],
+        mode='lines+markers', name='Planned Value (PV)',
+        line=dict(color='#1f77b4', width=3), marker=dict(size=8)
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=periods, y=periods_data['EV_cumulative'],
+        mode='lines+markers', name='Earned Value (EV)',
+        line=dict(color='#2ca02c', width=3), marker=dict(size=8)
+    ))
+
+    fig.add_trace(go.Scatter(
+        x=periods, y=periods_data['AC_cumulative'],
+        mode='lines+markers', name='Actual Cost (AC)',
+        line=dict(color='#d62728', width=3), marker=dict(size=8)
+    ))
+
+    # Add trend for EV (only for periods with data)
+    ev_mask = periods_data['EV_cumulative'] > 0
+    if ev_mask.sum() >= 2:
+        ev_periods = periods[ev_mask]
+        ev_values = periods_data.loc[ev_mask, 'EV_cumulative'].values
+        ev_trend = calculate_trend_regression(ev_periods, ev_values, forecast_periods)
+
+        if ev_trend:
+            fig.add_trace(go.Scatter(
+                x=ev_trend['all_periods'], y=ev_trend['fitted_values'],
+                mode='lines', name='EV Trend',
+                line=dict(color='#2ca02c', width=2, dash='dash')
+            ))
+
+            fig.add_trace(go.Scatter(
+                x=np.concatenate([ev_trend['all_periods'], ev_trend['all_periods'][::-1]]),
+                y=np.concatenate([ev_trend['confidence_upper'], ev_trend['confidence_lower'][::-1]]),
+                fill='toself', fillcolor='rgba(44, 160, 44, 0.1)',
+                line=dict(color='rgba(255,255,255,0)'),
+                name='95% Confidence', showlegend=True
+            ))
+
+    # Add BAC reference line
+    fig.add_hline(y=bac, line_dash="dot", line_color="gray",
+                  annotation_text=f"BAC: ${bac:,.0f}")
+
+    fig.update_layout(
+        title='S-Curve with Trend Analysis',
+        xaxis_title='Time Period',
+        yaxis_title='Cost ($)',
+        legend=dict(yanchor="top", y=0.99, xanchor="left", x=0.01),
+        hovermode='x unified',
+        height=500
+    )
+
+    return fig
+
+
+# ==================== EXPORT FUNCTIONS ====================
+
+def export_to_excel(metrics: dict, periods_data: pd.DataFrame = None,
+                    es_metrics: dict = None, project_name: str = "EVM_Report") -> bytes:
+    """Generate Excel report with multiple sheets"""
+    output = BytesIO()
+
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        # Sheet 1: Summary
+        summary_data = {
+            'Metric': ['BAC', 'PV', 'EV', 'AC', 'SV', 'CV', 'SPI', 'CPI',
+                      'EAC (Typical)', 'ETC', 'VAC', 'TCPI'],
+            'Value': [
+                f"${metrics['BAC']:,.0f}",
+                f"${metrics['PV']:,.0f}",
+                f"${metrics['EV']:,.0f}",
+                f"${metrics['AC']:,.0f}",
+                f"${metrics['SV']:,.0f}",
+                f"${metrics['CV']:,.0f}",
+                f"{metrics['SPI']:.3f}",
+                f"{metrics['CPI']:.3f}",
+                f"${metrics['EAC_typical']:,.0f}",
+                f"${metrics['ETC_typical']:,.0f}",
+                f"${metrics['VAC']:,.0f}",
+                f"{metrics['TCPI_BAC']:.3f}"
+            ],
+            'Status': [
+                '-',
+                f"{metrics['PC_planned']:.1f}% planned",
+                f"{metrics['PC_earned']:.1f}% earned",
+                '-',
+                'Ahead' if metrics['SV'] >= 0 else 'Behind',
+                'Under Budget' if metrics['CV'] >= 0 else 'Over Budget',
+                'Good' if metrics['SPI'] >= 1 else 'Behind',
+                'Good' if metrics['CPI'] >= 1 else 'Over Budget',
+                f"${metrics['EAC_typical'] - metrics['BAC']:+,.0f} vs BAC",
+                '-',
+                'Savings' if metrics['VAC'] >= 0 else 'Overrun',
+                'Achievable' if metrics['TCPI_BAC'] <= 1.1 else 'Challenging'
+            ]
+        }
+        df_summary = pd.DataFrame(summary_data)
+        df_summary.to_excel(writer, sheet_name='Summary', index=False)
+
+        # Sheet 2: Period Data
+        if periods_data is not None:
+            periods_data.to_excel(writer, sheet_name='Period Data', index=False)
+
+        # Sheet 3: Earned Schedule
+        if es_metrics:
+            es_data = {
+                'Metric': ['Earned Schedule (ES)', 'Actual Time (AT)', 'Planned Duration (PD)',
+                          'SV(t)', 'SPI(t)', 'EAC(t)'],
+                'Value': [
+                    f"{es_metrics['ES']:.2f} periods",
+                    f"{es_metrics['AT']} periods",
+                    f"{es_metrics['PD']} periods",
+                    f"{es_metrics['SV_t']:+.2f} periods",
+                    f"{es_metrics['SPI_t']:.3f}",
+                    f"{es_metrics['EAC_t']:.1f} periods" if es_metrics['EAC_t'] else "N/A"
+                ]
+            }
+            df_es = pd.DataFrame(es_data)
+            df_es.to_excel(writer, sheet_name='Earned Schedule', index=False)
+
+    return output.getvalue()
+
+
+def generate_html_report(metrics: dict, periods_data: pd.DataFrame = None,
+                         es_metrics: dict = None, project_name: str = "EVM Report") -> str:
+    """Generate HTML report for PDF printing"""
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>{project_name}</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 40px; }}
+            h1 {{ color: #333; border-bottom: 2px solid #1f77b4; padding-bottom: 10px; }}
+            h2 {{ color: #1f77b4; margin-top: 30px; }}
+            table {{ border-collapse: collapse; width: 100%; margin: 20px 0; }}
+            th, td {{ border: 1px solid #ddd; padding: 12px; text-align: left; }}
+            th {{ background-color: #1f77b4; color: white; }}
+            tr:nth-child(even) {{ background-color: #f9f9f9; }}
+            .good {{ color: #28a745; font-weight: bold; }}
+            .bad {{ color: #dc3545; font-weight: bold; }}
+            .footer {{ margin-top: 40px; font-size: 12px; color: #666; text-align: center; }}
+        </style>
+    </head>
+    <body>
+        <h1>{project_name}</h1>
+        <p>Generated: {datetime.now().strftime('%Y-%m-%d %H:%M')}</p>
+
+        <h2>Key Metrics</h2>
+        <table>
+            <tr><th>Metric</th><th>Value</th><th>Status</th></tr>
+            <tr><td>Budget at Completion (BAC)</td><td>${metrics['BAC']:,.0f}</td><td>-</td></tr>
+            <tr><td>Planned Value (PV)</td><td>${metrics['PV']:,.0f}</td><td>{metrics['PC_planned']:.1f}% planned</td></tr>
+            <tr><td>Earned Value (EV)</td><td>${metrics['EV']:,.0f}</td><td>{metrics['PC_earned']:.1f}% earned</td></tr>
+            <tr><td>Actual Cost (AC)</td><td>${metrics['AC']:,.0f}</td><td>-</td></tr>
+            <tr><td>Schedule Variance (SV)</td><td>${metrics['SV']:,.0f}</td>
+                <td class="{'good' if metrics['SV'] >= 0 else 'bad'}">{'Ahead' if metrics['SV'] >= 0 else 'Behind'}</td></tr>
+            <tr><td>Cost Variance (CV)</td><td>${metrics['CV']:,.0f}</td>
+                <td class="{'good' if metrics['CV'] >= 0 else 'bad'}">{'Under Budget' if metrics['CV'] >= 0 else 'Over Budget'}</td></tr>
+            <tr><td>Schedule Performance Index (SPI)</td><td>{metrics['SPI']:.3f}</td>
+                <td class="{'good' if metrics['SPI'] >= 1 else 'bad'}">{'Good' if metrics['SPI'] >= 1 else 'Behind'}</td></tr>
+            <tr><td>Cost Performance Index (CPI)</td><td>{metrics['CPI']:.3f}</td>
+                <td class="{'good' if metrics['CPI'] >= 1 else 'bad'}">{'Good' if metrics['CPI'] >= 1 else 'Over Budget'}</td></tr>
+            <tr><td>Estimate at Completion (EAC)</td><td>${metrics['EAC_typical']:,.0f}</td>
+                <td>${metrics['EAC_typical'] - metrics['BAC']:+,.0f} vs BAC</td></tr>
+            <tr><td>Variance at Completion (VAC)</td><td>${metrics['VAC']:,.0f}</td>
+                <td class="{'good' if metrics['VAC'] >= 0 else 'bad'}">{'Savings' if metrics['VAC'] >= 0 else 'Overrun'}</td></tr>
+        </table>
+    """
+
+    if es_metrics:
+        html += f"""
+        <h2>Earned Schedule Analysis</h2>
+        <table>
+            <tr><th>Metric</th><th>Value</th></tr>
+            <tr><td>Earned Schedule (ES)</td><td>{es_metrics['ES']:.2f} periods</td></tr>
+            <tr><td>Schedule Variance (time)</td><td>{es_metrics['SV_t']:+.2f} periods</td></tr>
+            <tr><td>SPI (time-based)</td><td>{es_metrics['SPI_t']:.3f}</td></tr>
+            <tr><td>Estimated Completion</td><td>{es_metrics['EAC_t']:.1f} periods</td></tr>
+        </table>
+        """
+
+    html += """
+        <div class="footer">
+            <p>EVM Calculator - Based on IPMA Standards</p>
+            <p>Developed by Boris Taliev</p>
+        </div>
+    </body>
+    </html>
+    """
+    return html
+
+
 # ==================== MAIN APPLICATION ====================
 
 def main():
+    # Session state initialization
+    if 'project_name' not in st.session_state:
+        st.session_state.project_name = "Untitled Project"
+    if 'loaded_data' not in st.session_state:
+        st.session_state.loaded_data = None
+
     # Header
     st.title("📊 EVM Calculator")
     st.markdown("### Earned Value Management - Based on IPMA Standards")
     st.markdown("---")
 
-    # Sidebar - Input Section
+    # Sidebar
     with st.sidebar:
+        # Project Management Section
+        st.header("📁 Project Management")
+        project_name = st.text_input("Project Name", value=st.session_state.project_name)
+        st.session_state.project_name = project_name
+
+        uploaded_file = st.file_uploader("Load Project (.json)", type=['json'])
+        if uploaded_file is not None:
+            json_content = uploaded_file.read().decode('utf-8')
+            result = load_project_json(json_content)
+            if result['success']:
+                st.session_state.loaded_data = result
+                st.session_state.project_name = result['project_name']
+                st.success(f"Loaded: {result['project_name']}")
+            else:
+                st.error(result['error_message'])
+
+        st.markdown("---")
+
+        # Input Section
         st.header("📥 Project Data Input")
 
         input_mode = st.radio(
@@ -599,6 +988,19 @@ def main():
         # Calculate metrics
         metrics = calculate_evm_metrics(pv, ev, ac, bac)
 
+        # Determine current period for ES calculation
+        if periods_data is not None:
+            # Find the last period with actual data (EV > 0)
+            ev_mask = periods_data['EV'] > 0
+            if ev_mask.any():
+                current_period = periods_data.loc[ev_mask, 'Period'].max()
+            else:
+                current_period = 1
+            es_metrics = calculate_earned_schedule(periods_data, current_period)
+        else:
+            current_period = None
+            es_metrics = None
+
         # Create tabs for different sections
         tab1, tab2, tab3, tab4, tab5 = st.tabs([
             "📈 Dashboard", "📐 Formulas & Calculations", "📊 Charts",
@@ -665,6 +1067,70 @@ def main():
             with col3:
                 st.metric("To-Complete Performance Index", f"{metrics['TCPI_BAC']:.2f}",
                          "Required CPI for remaining work")
+
+            # Earned Schedule Section
+            if es_metrics is not None:
+                st.markdown("---")
+                st.subheader("⏱️ Earned Schedule (Time-Based Metrics)")
+                col1, col2, col3, col4 = st.columns(4)
+
+                with col1:
+                    st.metric("Earned Schedule (ES)", f"{es_metrics['ES']:.2f} periods")
+                with col2:
+                    sv_t_delta = "Ahead" if es_metrics['SV_t'] >= 0 else "Behind"
+                    st.metric("SV(t)", f"{es_metrics['SV_t']:+.2f} periods", sv_t_delta)
+                with col3:
+                    spi_t_delta = "Good" if es_metrics['SPI_t'] >= 1 else "Behind"
+                    st.metric("SPI(t)", f"{es_metrics['SPI_t']:.3f}", spi_t_delta)
+                with col4:
+                    if es_metrics['EAC_t']:
+                        eac_t_delta = f"{es_metrics['EAC_t'] - es_metrics['PD']:+.1f} vs Plan"
+                        st.metric("EAC(t)", f"{es_metrics['EAC_t']:.1f} periods", eac_t_delta)
+                    else:
+                        st.metric("EAC(t)", "N/A")
+
+            # Export Section
+            st.markdown("---")
+            st.subheader("📤 Export Reports")
+            col1, col2, col3 = st.columns(3)
+
+            with col1:
+                # Save Project JSON
+                if periods_data is not None:
+                    json_data = create_project_json(
+                        st.session_state.project_name, bac, periods_data
+                    )
+                    st.download_button(
+                        label="💾 Save Project (.json)",
+                        data=json_data,
+                        file_name=f"{st.session_state.project_name.replace(' ', '_')}_{datetime.now():%Y%m%d}.json",
+                        mime="application/json",
+                        use_container_width=True
+                    )
+
+            with col2:
+                # Excel Export
+                excel_data = export_to_excel(metrics, periods_data, es_metrics, st.session_state.project_name)
+                st.download_button(
+                    label="📊 Download Excel",
+                    data=excel_data,
+                    file_name=f"EVM_Report_{datetime.now():%Y%m%d}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True
+                )
+
+            with col3:
+                # HTML Report
+                html_report = generate_html_report(metrics, periods_data, es_metrics, st.session_state.project_name)
+                st.download_button(
+                    label="📄 Download HTML",
+                    data=html_report,
+                    file_name=f"EVM_Report_{datetime.now():%Y%m%d}.html",
+                    mime="text/html",
+                    use_container_width=True
+                )
+
+            st.caption("💡 Tip: Open HTML in browser and press Ctrl+P to save as PDF")
 
         # ==================== TAB 2: FORMULAS ====================
         with tab2:
@@ -790,6 +1256,47 @@ def main():
                 else:
                     st.warning("TCPI > 1.1: Target may be difficult to achieve")
 
+            # Earned Schedule Formulas
+            if es_metrics is not None:
+                st.markdown("---")
+                st.markdown("### Earned Schedule (Time-Based Metrics)")
+
+                col1, col2 = st.columns(2)
+
+                with col1:
+                    st.markdown("#### Earned Schedule (ES)")
+                    st.latex(r"ES = n + \frac{EV - PV_n}{PV_{n+1} - PV_n}")
+                    st.info(f"**Your Value:** ES = **{es_metrics['ES']:.2f} periods**")
+                    st.caption("n is the period where PV_n ≤ EV < PV_{n+1}")
+
+                    st.markdown("#### Schedule Variance (Time)")
+                    st.latex(r"SV(t) = ES - AT")
+                    st.info(f"**Calculation:** {es_metrics['ES']:.2f} - {es_metrics['AT']} = **{es_metrics['SV_t']:+.2f} periods**")
+                    if es_metrics['SV_t'] >= 0:
+                        st.success("SV(t) ≥ 0: Project is ahead of schedule")
+                    else:
+                        st.error("SV(t) < 0: Project is behind schedule")
+
+                with col2:
+                    st.markdown("#### Schedule Performance Index (Time)")
+                    st.latex(r"SPI(t) = \frac{ES}{AT}")
+                    st.info(f"**Calculation:** {es_metrics['ES']:.2f} / {es_metrics['AT']} = **{es_metrics['SPI_t']:.3f}**")
+                    if es_metrics['SPI_t'] >= 1:
+                        st.success("SPI(t) ≥ 1: Progressing faster than planned")
+                    else:
+                        st.error(f"SPI(t) < 1: Only {es_metrics['SPI_t']*100:.1f}% of planned progress rate")
+
+                    st.markdown("#### Estimate at Completion (Time)")
+                    st.latex(r"EAC(t) = AT + \frac{PD - ES}{SPI(t)}")
+                    if es_metrics['EAC_t']:
+                        st.info(f"**Calculation:** {es_metrics['AT']} + ({es_metrics['PD']} - {es_metrics['ES']:.2f}) / {es_metrics['SPI_t']:.3f} = **{es_metrics['EAC_t']:.1f} periods**")
+                        if es_metrics['EAC_t'] <= es_metrics['PD']:
+                            st.success("EAC(t) ≤ PD: Expected to finish on or before planned duration")
+                        else:
+                            st.warning(f"EAC(t) > PD: Expected {es_metrics['EAC_t'] - es_metrics['PD']:.1f} periods delay")
+                    else:
+                        st.info("**EAC(t):** Cannot calculate (SPI(t) = 0)")
+
         # ==================== TAB 3: CHARTS ====================
         with tab3:
             st.header("Visual Analysis")
@@ -833,6 +1340,40 @@ def main():
                 - If EV is below PV, the project is behind schedule
                 - If AC is above EV, the project is over budget
                 """)
+
+                st.markdown("---")
+
+                # Trend Analysis Section
+                st.subheader("📈 Trend Analysis & Forecasting")
+                col_trend1, col_trend2 = st.columns([1, 3])
+
+                with col_trend1:
+                    show_trends = st.checkbox("Show Trends", value=True)
+                    forecast_periods = st.slider("Forecast Periods", 1, 6, 3)
+
+                with col_trend2:
+                    if show_trends:
+                        fig_trends = create_s_curve_with_trends(periods_data, bac, forecast_periods)
+                        st.plotly_chart(fig_trends, use_container_width=True)
+
+                        # Show trend statistics
+                        ev_mask = periods_data['EV'] > 0
+                        if ev_mask.sum() >= 2:
+                            ev_periods = periods_data.loc[ev_mask, 'Period'].values
+                            ev_values = periods_data.loc[ev_mask, 'EV_cumulative'].values
+                            ev_trend = calculate_trend_regression(ev_periods, ev_values, forecast_periods)
+
+                            if ev_trend:
+                                col_stat1, col_stat2, col_stat3 = st.columns(3)
+                                with col_stat1:
+                                    st.metric("Trend R²", f"{ev_trend['r_squared']:.3f}",
+                                             help="How well the trend line fits the data (1.0 = perfect fit)")
+                                with col_stat2:
+                                    st.metric("EV Growth Rate", f"${ev_trend['slope']:,.0f}/period")
+                                with col_stat3:
+                                    projected_ev = ev_trend['forecast_values'][-1]
+                                    st.metric(f"Projected EV (Period {int(ev_trend['forecast_periods'][-1])})",
+                                             f"${projected_ev:,.0f}")
 
                 st.markdown("---")
 
@@ -1176,9 +1717,9 @@ def main():
     st.markdown("---")
     st.markdown(
         """
-        <div style="text-align: center; padding: 10px; color: #999;">
-            <p style="margin-bottom: 5px; font-size: 12px;">Developed by Boris Taliev</p>
-            <p style="margin: 0; font-size: 10px;">
+        <div style="text-align: center; padding: 5px; color: #999;">
+            <p style="margin-bottom: 5px; font-size: 5px;">Developed by Boris Taliev</p>
+            <p style="margin: 0; font-size: 5px;">
                 <a href="https://www.linkedin.com/in/boris-taliev-a9960a6b/" target="_blank" style="text-decoration: none; color: #aaa;">LinkedIn</a>
                 &nbsp;·&nbsp;
                 <a href="https://rccalcs-tp7b2fnba2jsmk8jasxtxv.streamlit.app" target="_blank" style="text-decoration: none; color: #aaa;">RC Calculator</a>
