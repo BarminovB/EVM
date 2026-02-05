@@ -1808,9 +1808,6 @@ def main():
         st.markdown("""
         ### Welcome to the EVM Calculator!
 
-        This educational tool helps you understand and apply **Earned Value Management (EVM)**
-        according to IPMA standards.
-
         #### What you can do:
 
         1. **Single Period Analysis**: Enter current PV, EV, and AC values
