@@ -1690,9 +1690,6 @@ def main():
             According to the **International Project Management Association (IPMA)**, EVM is a key competence
             under the **Practice Competence Elements**, specifically:
 
-            - **Practice 4.5.6**: Plan and control resources and costs
-            - **Practice 4.5.7**: Plan and control schedule
-
             ### Key EVM Concepts
 
             #### The Three Pillars of EVM
