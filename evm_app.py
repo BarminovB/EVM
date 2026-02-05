@@ -279,6 +279,10 @@ def create_forecast_chart(bac: float, eac: float, ac: float, ev: float) -> go.Fi
     values = [bac, eac, ac, ev]
     colors = ['#1f77b4', '#ff7f0e', '#d62728', '#2ca02c']
 
+    # Calculate max value for y-axis with padding for text labels
+    max_value = max(values)
+    y_max = max_value * 1.15  # 15% padding for text labels
+
     fig = go.Figure(data=[
         go.Bar(x=categories, y=values, marker_color=colors, text=[f'{v:,.0f}' for v in values],
                textposition='outside')
@@ -287,6 +291,7 @@ def create_forecast_chart(bac: float, eac: float, ac: float, ev: float) -> go.Fi
     fig.update_layout(
         title='Budget vs. Forecast Comparison',
         yaxis_title='Cost',
+        yaxis=dict(range=[0, y_max], tickformat=',.0f'),
         height=400,
         showlegend=False
     )
@@ -527,9 +532,19 @@ def create_classic_evm_chart(
         fig.add_hrect(
             y0=bac, y1=eac,
             fillcolor="rgba(251, 191, 36, 0.3)",
-            line_width=0,
-            annotation_text="Management Reserve",
-            annotation_position="inside top left"
+            line_width=0
+        )
+        # Separate annotation for Management Reserve with better visibility
+        fig.add_annotation(
+            x=0.5,
+            y=(bac + eac) / 2,
+            text="<b>Management Reserve</b>",
+            showarrow=False,
+            font=dict(size=11, color='#B45309'),
+            bgcolor='rgba(251, 191, 36, 0.8)',
+            bordercolor='#B45309',
+            borderwidth=1,
+            borderpad=4
         )
 
     # === 6. BAC LINE ===
@@ -591,67 +606,131 @@ def create_classic_evm_chart(
         )
 
     # === 10. COST VARIANCE (CV) annotation ===
-    if ev_current > 0 and ac_current > 0:
-        # Bracket showing CV
-        cv_x = current_period - 0.15
+    if ev_current > 0 and ac_current > 0 and abs(cv) > 0.01:
+        # Dimension line for CV - positioned to the left of Time Now line
+        cv_x = current_period - 0.6
+
+        # Vertical dimension line
         fig.add_trace(go.Scatter(
             x=[cv_x, cv_x],
             y=[ev_current, ac_current],
             mode='lines',
-            line=dict(color='#000000', width=2),
+            line=dict(color='#DC2626', width=2),
             showlegend=False,
             hoverinfo='skip'
         ))
-        # Add bracket ends
+        # Horizontal ticks at ends (dimension line style)
+        tick_width = 0.15
         fig.add_trace(go.Scatter(
-            x=[cv_x - 0.1, cv_x + 0.1],
+            x=[cv_x - tick_width, cv_x + tick_width],
             y=[ev_current, ev_current],
             mode='lines',
-            line=dict(color='#000000', width=2),
+            line=dict(color='#DC2626', width=2),
             showlegend=False,
             hoverinfo='skip'
         ))
         fig.add_trace(go.Scatter(
-            x=[cv_x - 0.1, cv_x + 0.1],
+            x=[cv_x - tick_width, cv_x + tick_width],
             y=[ac_current, ac_current],
             mode='lines',
-            line=dict(color='#000000', width=2),
+            line=dict(color='#DC2626', width=2),
+            showlegend=False,
+            hoverinfo='skip'
+        ))
+        # Extension lines from points to dimension line
+        fig.add_trace(go.Scatter(
+            x=[current_period, cv_x + tick_width],
+            y=[ev_current, ev_current],
+            mode='lines',
+            line=dict(color='#DC2626', width=1, dash='dot'),
+            showlegend=False,
+            hoverinfo='skip'
+        ))
+        fig.add_trace(go.Scatter(
+            x=[current_period, cv_x + tick_width],
+            y=[ac_current, ac_current],
+            mode='lines',
+            line=dict(color='#DC2626', width=1, dash='dot'),
             showlegend=False,
             hoverinfo='skip'
         ))
 
         cv_mid = (ev_current + ac_current) / 2
         fig.add_annotation(
-            x=cv_x - 0.3,
+            x=cv_x - 0.2,
             y=cv_mid,
             text=f"<b>Cost Variance (CV)</b><br>{cv:+,.0f}",
             showarrow=False,
             xanchor='right',
-            font=dict(size=10, color='#000000'),
-            bgcolor='rgba(255,255,255,0.8)'
+            font=dict(size=10, color='#DC2626'),
+            bgcolor='rgba(255,255,255,0.9)',
+            bordercolor='#DC2626',
+            borderwidth=1,
+            borderpad=4
         )
 
     # === 11. SCHEDULE VARIANCE (SV) annotation ===
-    if ev_current > 0 and pv_current > 0:
-        # Bracket showing SV
+    if ev_current > 0 and pv_current > 0 and abs(sv) > 0.01:
+        # Dimension line for SV - positioned to the right of Time Now line
+        sv_x = current_period + 0.6
+
+        # Vertical dimension line
         fig.add_trace(go.Scatter(
-            x=[current_period, current_period],
+            x=[sv_x, sv_x],
             y=[ev_current, pv_current],
             mode='lines',
-            line=dict(color='#000000', width=2),
+            line=dict(color='#1E3A8A', width=2),
+            showlegend=False,
+            hoverinfo='skip'
+        ))
+        # Horizontal ticks at ends (dimension line style)
+        tick_width = 0.15
+        fig.add_trace(go.Scatter(
+            x=[sv_x - tick_width, sv_x + tick_width],
+            y=[ev_current, ev_current],
+            mode='lines',
+            line=dict(color='#1E3A8A', width=2),
+            showlegend=False,
+            hoverinfo='skip'
+        ))
+        fig.add_trace(go.Scatter(
+            x=[sv_x - tick_width, sv_x + tick_width],
+            y=[pv_current, pv_current],
+            mode='lines',
+            line=dict(color='#1E3A8A', width=2),
+            showlegend=False,
+            hoverinfo='skip'
+        ))
+        # Extension lines from Time Now to dimension line
+        fig.add_trace(go.Scatter(
+            x=[current_period, sv_x - tick_width],
+            y=[ev_current, ev_current],
+            mode='lines',
+            line=dict(color='#1E3A8A', width=1, dash='dot'),
+            showlegend=False,
+            hoverinfo='skip'
+        ))
+        fig.add_trace(go.Scatter(
+            x=[current_period, sv_x - tick_width],
+            y=[pv_current, pv_current],
+            mode='lines',
+            line=dict(color='#1E3A8A', width=1, dash='dot'),
             showlegend=False,
             hoverinfo='skip'
         ))
 
+        sv_mid = (ev_current + pv_current) / 2
         fig.add_annotation(
-            x=current_period + 0.3,
-            y=(ev_current + pv_current) / 2,
+            x=sv_x + 0.2,
+            y=sv_mid,
             text=f"<b>Schedule Variance (SV)</b><br>{sv:+,.0f}",
-            showarrow=True,
-            ax=80,
-            ay=0,
-            font=dict(size=10, color='#000000'),
-            bgcolor='rgba(255,255,255,0.8)'
+            showarrow=False,
+            xanchor='left',
+            font=dict(size=10, color='#1E3A8A'),
+            bgcolor='rgba(255,255,255,0.9)',
+            bordercolor='#1E3A8A',
+            borderwidth=1,
+            borderpad=4
         )
 
     # === 12. SV-time annotation ===
@@ -721,7 +800,7 @@ def create_classic_evm_chart(
 
     # === LAYOUT ===
     max_y = max(bac, eac, max(planned_value_data), max(actual_cost_data) if actual_cost_data else 0) * 1.2
-    max_x = max(n_periods, completion_period) + 1
+    max_x = max(n_periods, completion_period) + 1.5
 
     fig.update_layout(
         title={
@@ -737,9 +816,7 @@ def create_classic_evm_chart(
             yanchor="bottom",
             y=1.02,
             xanchor="center",
-            x=0.5,
-            bgcolor='rgba(255,255,255,0.9)',
-            borderwidth=1
+            x=0.5
         ),
         height=600,
         plot_bgcolor='white',
@@ -764,7 +841,7 @@ def create_classic_evm_chart(
             tickformat=',.0f'
         ),
         font=dict(family="Arial, sans-serif", size=12),
-        margin=dict(t=80, b=80, l=80, r=100)
+        margin=dict(t=80, b=80, l=120, r=120)
     )
 
     return fig
