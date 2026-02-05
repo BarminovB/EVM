@@ -1506,47 +1506,6 @@ def main():
 
                 st.markdown("---")
 
-                # EVM Performance Graph
-                st.subheader("EVM Performance Graph")
-                fig_evm = create_evm_performance_graph(
-                    planned_value_data=periods_data['PV_cumulative'].tolist(),
-                    actual_cost_data=periods_data['AC_cumulative'].tolist(),
-                    earned_value_data=periods_data['EV_cumulative'].tolist(),
-                    time_unit="Period"
-                )
-                st.plotly_chart(fig_evm, use_container_width=True)
-
-                st.markdown("""
-                **How to read the EVM Performance Graph:**
-                - **PV (Blue, dashed)**: Planned Value - the baseline budget over time
-                - **AC (Red, solid)**: Actual Cost - real expenditure to date
-                - **EV (Green, solid)**: Earned Value - value of completed work
-
-                **Interpretation:**
-                - **EV below PV** → Behind schedule (work accomplished < work planned)
-                - **EV above PV** → Ahead of schedule (work accomplished > work planned)
-                - **AC above EV** → Over budget (spending more than earning)
-                - **AC below EV** → Under budget (spending less than earning)
-                """)
-
-                st.markdown("---")
-
-                # S-Curve
-                st.subheader("S-Curve Analysis")
-                fig_s_curve = create_s_curve(periods_data)
-                st.plotly_chart(fig_s_curve, use_container_width=True)
-
-                st.markdown("""
-                **How to read the S-Curve:**
-                - **PV (Blue)**: The planned progress baseline
-                - **EV (Green)**: Actual progress in terms of value earned
-                - **AC (Red)**: Actual costs incurred
-                - If EV is below PV, the project is behind schedule
-                - If AC is above EV, the project is over budget
-                """)
-
-                st.markdown("---")
-
                 # Variance Chart
                 col1, col2 = st.columns(2)
 
