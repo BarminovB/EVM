@@ -1176,26 +1176,14 @@ def main():
     st.markdown("---")
     st.markdown(
         """
-        <div style="text-align: center; padding: 20px; color: #666;">
-            <p style="margin-bottom: 10px;">
-                <strong>Developed by Boris Taliev</strong>
-            </p>
-            <p style="margin-bottom: 10px;">
-                <a href="https://www.linkedin.com/in/boris-taliev-a9960a6b/" target="_blank" style="text-decoration: none; color: #0077B5;">
-                    🔗 LinkedIn Profile
-                </a>
-            </p>
-            <p style="margin-bottom: 5px;">
-                <strong>My other projects:</strong>
-            </p>
-            <p style="margin-bottom: 5px;">
-                <a href="https://rccalcs-tp7b2fnba2jsmk8jasxtxv.streamlit.app" target="_blank" style="text-decoration: none; color: #FF4B4B;">
-                    📊 RC Calculator
-                </a>
-                &nbsp;|&nbsp;
-                <a href="https://steelsheet.streamlit.app" target="_blank" style="text-decoration: none; color: #FF4B4B;">
-                    🔩 Steel Sheet Calculator
-                </a>
+        <div style="text-align: center; padding: 10px; color: #999;">
+            <p style="margin-bottom: 5px; font-size: 12px;">Developed by Boris Taliev</p>
+            <p style="margin: 0; font-size: 10px;">
+                <a href="https://www.linkedin.com/in/boris-taliev-a9960a6b/" target="_blank" style="text-decoration: none; color: #aaa;">LinkedIn</a>
+                &nbsp;·&nbsp;
+                <a href="https://rccalcs-tp7b2fnba2jsmk8jasxtxv.streamlit.app" target="_blank" style="text-decoration: none; color: #aaa;">RC Calculator</a>
+                &nbsp;·&nbsp;
+                <a href="https://steelsheet.streamlit.app" target="_blank" style="text-decoration: none; color: #aaa;">Steel Sheet Calculator</a>
             </p>
         </div>
         """,
