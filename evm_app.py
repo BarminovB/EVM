@@ -530,6 +530,9 @@ def create_classic_evm_chart(
 
     # === 5. MANAGEMENT RESERVE AREA ===
     if eac > bac:
+        # Calculate shortage (negative VAC means over budget)
+        shortage = eac - bac  # Amount over budget
+
         # Show area between BAC and EAC as Management Reserve needed
         fig.add_hrect(
             y0=bac, y1=eac,
@@ -540,7 +543,7 @@ def create_classic_evm_chart(
         fig.add_annotation(
             x=0.5,
             y=(bac + eac) / 2,
-            text="<b>Management Reserve</b>",
+            text=f"<b>Management Reserve</b><br>Shortfall: {shortage:,.0f}",
             showarrow=False,
             font=dict(size=11, color='#B45309'),
             bgcolor='rgba(251, 191, 36, 0.8)',
