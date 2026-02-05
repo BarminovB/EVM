@@ -1202,23 +1202,24 @@ def main():
             periods = st.number_input("Number of Periods",
                                       min_value=2, max_value=24, value=6, step=1)
 
-            st.subheader("Enter Period Data")
+            st.subheader("Enter Period Data (Cumulative Values)")
+            st.caption("Enter cumulative (running total) values for each period, not per-period increments")
 
             # Create input dataframe
             periods_data = pd.DataFrame({
                 'Period': range(1, periods + 1),
-                'PV': [0.0] * periods,
-                'EV': [0.0] * periods,
-                'AC': [0.0] * periods
+                'PV_cumulative': [0.0] * periods,
+                'EV_cumulative': [0.0] * periods,
+                'AC_cumulative': [0.0] * periods
             })
 
             edited_df = st.data_editor(
                 periods_data,
                 column_config={
                     "Period": st.column_config.NumberColumn("Period", disabled=True),
-                    "PV": st.column_config.NumberColumn("Planned Value", min_value=0, format="%.0f"),
-                    "EV": st.column_config.NumberColumn("Earned Value", min_value=0, format="%.0f"),
-                    "AC": st.column_config.NumberColumn("Actual Cost", min_value=0, format="%.0f"),
+                    "PV_cumulative": st.column_config.NumberColumn("PV (cumulative)", min_value=0, format="%.0f"),
+                    "EV_cumulative": st.column_config.NumberColumn("EV (cumulative)", min_value=0, format="%.0f"),
+                    "AC_cumulative": st.column_config.NumberColumn("AC (cumulative)", min_value=0, format="%.0f"),
                 },
                 hide_index=True,
                 use_container_width=True
@@ -1226,11 +1227,7 @@ def main():
 
             periods_data = edited_df.copy()
 
-            # Calculate cumulative values
-            periods_data['PV_cumulative'] = periods_data['PV'].cumsum()
-            periods_data['EV_cumulative'] = periods_data['EV'].cumsum()
-            periods_data['AC_cumulative'] = periods_data['AC'].cumsum()
-
+            # Values are already cumulative - no need to sum
             # Calculate variances and indices
             periods_data['SV'] = periods_data['EV_cumulative'] - periods_data['PV_cumulative']
             periods_data['CV'] = periods_data['EV_cumulative'] - periods_data['AC_cumulative']
